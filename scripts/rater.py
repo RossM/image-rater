@@ -1,4 +1,5 @@
 import random
+import time
 import json
 import gradio as gr
 
@@ -101,18 +102,34 @@ def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
     state['current_comparison'] = []
     return ["No images loaded", None, None]
+    
+def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
+    if len(state['files']) == 0:
+        yield "No files loaded"
+        return
+
+    yield "Calculating embeddings..."
+    last_progress_update = time.time()
+    for filepath in progress.tqdm(state['files']):
+        if time.time() >= last_progress_update + 1:
+            last_progress_update = time.time()
+            yield f"Calculating embeddings... {Path(filepath).name}"
+        image = Image.open(filepath)
+        embedding_cache.get_embedding(filepath, image)
+        
+    yield "Done"
 
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
+        with gr.Accordion(label="Config"):
+            with gr.Row():
+                with gr.Column():
+                    images_path = gr.Textbox(label="Images path", scale=1)
+                    with gr.Row():
+                        load_images_btn = gr.Button(value="Load", scale=1)
+                        unload_btn = gr.Button(value="Unload", scale=1)
+                status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
         with gr.Tab(label="Rate"):
-            with gr.Accordion(label="Config"):
-                with gr.Row():
-                    with gr.Column():
-                        images_path = gr.Textbox(label="Images path", scale=1)
-                        with gr.Row():
-                            load_images_btn = gr.Button(value="Load", scale=1)
-                            cancel_btn = gr.Button(value="Unload", scale=1)
-                    status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
             gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
                 with gr.Column():
@@ -124,14 +141,23 @@ def on_ui_tabs():
                     right_btn = gr.Button(value="Pick")
                     right_val = gr.State(value=1)
             skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
-            state = gr.State(value={})
+            state = gr.State(value={
+                "files": []
+            })
+        with gr.Tab(label="Analyze"):
+            with gr.Row():
+                calc_embeddings_btn = gr.Button(value="Calculate embeddings")
+                cancel_btn = gr.Button(value="Cancel", variant="stop")
     
         load_event = load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
-        cancel_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
+        unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
         
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
         left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
+        
+        calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], outputs=[status_area])
+        cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event], outputs=[status_area])
     
     return (ui_tab, "Image Rater", "imagerater"),
 

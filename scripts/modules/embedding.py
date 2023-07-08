@@ -27,10 +27,8 @@ class EmbeddingCache:
                         self.cache[key] = value
                     except Exception as e:
                         print(e)
-                        pass
         except Exception as e:
             print(e)
-            pass
             
     def encode(self, tensor: Tensor):
         return self.config + ":" + tensor.numpy().tobytes().hex()
@@ -38,12 +36,13 @@ class EmbeddingCache:
     def decode(self, encoded: str):
         prefix, hex = encoded.split(':')
         if prefix != self.config:
-            raise ValueError(f"Expected config '{self.config}' but got '{prefix}'")
+            raise ValueError(f"Expected OpenCLIP config '{self.config}' but got '{prefix}'")
         return Tensor(numpy.frombuffer(bytearray.fromhex(hex)))
         
     def get_embedding(self, filename: str, image: Image):
-        embedding = self.cache.get(filename, None)
+        embedding = self.cache.get(str(filename), None)
         if embedding != None:
+            print(f"Found cached embedding for {filename}")
             return embedding
     
         image = self.preprocess(image).unsqueeze(0)
@@ -52,8 +51,9 @@ class EmbeddingCache:
             image_features = self.model.encode_image(image)
             image_features /= image_features.norm(dim=-1, keepdim=True)
         
-        embedding = image_features.flatten()
+        embedding = image_features.flatten().cpu()
         self.cache[filename] = embedding
+        print(f"Calculated embedding for {filename}")
         try:
             with open(self.cache_file, 'a') as f:
                 f.write(json.dumps({
@@ -62,5 +62,4 @@ class EmbeddingCache:
                 }) + "\n")
         except Exception as e:
             print(e)
-            pass
         return embedding
