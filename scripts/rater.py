@@ -8,9 +8,17 @@ from modules.ui import create_output_panel, create_refresh_button
 from PIL import Image
 from pathlib import Path
 
+from scripts.modules.embedding import EmbeddingCache
+
 root_path = Path(__file__).parents[3]
 image_rater_path = root_path / 'image_rater'
 log_path = image_rater_path / 'log'
+cache_path = image_rater_path / 'cache'
+
+embedding_cache = None
+
+log_path.mkdir(parents=True, exist_ok=True)
+cache_path.mkdir(parents=True, exist_ok=True)
 
 def generate_comparison(state: dict):
     filepaths = state['files']
@@ -37,8 +45,6 @@ def log_and_generate(result, state: dict):
     print(f"result={result}")
     print(f"log_path={log_path}")
     
-    log_path.mkdir(parents=True, exist_ok=True)
-
     with open(log_path / 'default.json', 'a') as f:
         f.write(json.dumps({
             'files': state['current_comparison'],
@@ -51,8 +57,13 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
     if not images_path:
         yield ["You must provide the path to a directory with image files", None, None]
         return
+        
+    global embedding_cache
+    if not embedding_cache:
+        yield ["Loading OpenCLIP ViT-H/14...", None, None]
+        embedding_cache = EmbeddingCache(cache_path)
     
-    yield [f"Loading images from {images_path}", None, None]
+    yield [f"Loading images from {images_path}...", None, None]
     
     path = Path(images_path)
     
@@ -67,9 +78,15 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
     
     for filepath in progress.tqdm(filepaths):
         try:
+            if filepath.suffix == '.txt':
+                continue
             image = Image.open(filepath)
-            state['files'].append(str(filepath))
+            filepath = str(filepath)
+            state['files'].append(filepath)
+            #embed = embedding_cache.get_embedding(filepath, image)
+            #print(f"{filepath}: {embed}")
         except Exception as e:
+            print(e)
             continue
     
     state['loading'] = False
