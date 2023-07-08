@@ -72,26 +72,27 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
 
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
-        with gr.Accordion(label="Config"):
-            with gr.Row():
+        with gr.Tab(label="Rate"):
+            with gr.Accordion(label="Config"):
+                with gr.Row():
+                    with gr.Column():
+                        images_path = gr.Textbox(label="Images path", scale=1)
+                        with gr.Row():
+                            load_images_btn = gr.Button(value="Load", scale=1)
+                            clear_images_btn = gr.Button(value="Clear", scale=1)
+                    status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
+            gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
+            with gr.Row(elem_id="imagerater_image_row"):
                 with gr.Column():
-                    images_path = gr.Textbox(label="Images path", scale=1)
-                    with gr.Row():
-                        load_images_btn = gr.Button(value="Load", scale=1)
-                        clear_images_btn = gr.Button(value="Clear", scale=1)
-                status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
-        gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
-        with gr.Row(elem_id="imagerater_image_row"):
-            with gr.Column():
-                left_img = gr.Image(interactive=False, container=False)
-                left_btn = gr.Button(value="Pick", container=False)
-                left_val = gr.State(value=0)
-            with gr.Column():
-                right_img = gr.Image(interactive=False)
-                right_btn = gr.Button(value="Pick")
-                right_val = gr.State(value=1)
-        skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
-        state = gr.State(value={})
+                    left_img = gr.Image(interactive=False, container=False)
+                    left_btn = gr.Button(value="Pick", container=False)
+                    left_val = gr.State(value=0)
+                with gr.Column():
+                    right_img = gr.Image(interactive=False)
+                    right_btn = gr.Button(value="Pick")
+                    right_val = gr.State(value=1)
+            skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
+            state = gr.State(value={})
     
         load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
