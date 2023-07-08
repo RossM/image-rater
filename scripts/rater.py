@@ -1,4 +1,5 @@
 import random
+import json
 import gradio as gr
 
 from modules import (devices, script_callbacks, scripts, shared)
@@ -6,6 +7,10 @@ from modules.ui import create_output_panel, create_refresh_button
 
 from PIL import Image
 from pathlib import Path
+
+root_path = Path(__file__).parents[3]
+image_rater_path = root_path / 'image_rater'
+log_path = image_rater_path / 'log'
 
 def generate_comparison(state: dict):
     filepaths = state['files']
@@ -28,8 +33,18 @@ def generate_comparison(state: dict):
         
     return outputs
 
-def save_and_generate(result, state: dict):
+def log_and_generate(result, state: dict):
     print(f"result={result}")
+    print(f"log_path={log_path}")
+    
+    log_path.mkdir(parents=True, exist_ok=True)
+
+    with open(log_path / 'default.json', 'a') as f:
+        f.write(json.dumps({
+            'files': state['current_comparison'],
+            'choice': result,
+        }) + "\n")
+    
     return generate_comparison(state)
 
 def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progress()):
@@ -47,7 +62,7 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
     for filepath in progress.tqdm(filepaths):
         try:
             image = Image.open(filepath)
-            state['files'].append(filepath)
+            state['files'].append(str(filepath))
         except Exception as e:
             continue
     
@@ -80,8 +95,8 @@ def on_ui_tabs():
     
         load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
-        left_btn.click(save_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
-        right_btn.click(save_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
+        left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
+        right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
     
     return (ui_tab, "Image Rater", "imagerater"),
 
