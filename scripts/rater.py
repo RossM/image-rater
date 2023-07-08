@@ -1,7 +1,59 @@
+import random
 import gradio as gr
 
 from modules import (devices, script_callbacks, scripts, shared)
 from modules.ui import create_output_panel, create_refresh_button
+
+from PIL import Image
+from pathlib import Path
+
+def generate_comparison(state: dict):
+    filepaths = state['files']
+    
+    if len(filepaths) < 2:
+        return None, None
+        
+    random.shuffle(filepaths)
+    
+    max_size = 800
+    
+    outputs = []
+    state['current_comparison'] = selected = filepaths[0:2]
+    for filepath in selected:
+        image = Image.open(filepath)
+        padded_image = Image.new(mode="RGB", size=(max_size, max_size), color="white")
+        image.thumbnail((max_size, max_size))
+        padded_image.paste(image, box=((max_size - image.width) // 2, (max_size - image.height) // 2))
+        outputs.append(padded_image)
+        
+    return outputs
+
+def save_and_generate(result, state: dict):
+    print(f"result={result}")
+    return generate_comparison(state)
+
+def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progress()):
+    if not images_path:
+        return ["You must provide the path to a directory with image files", None, None]
+    
+    path = Path(images_path)
+    
+    filepaths = list(path.glob('*'))
+    state['files'] = []
+    
+    if len(filepaths) == 0:
+        return [f"No files found at {images_path}, check that you have the correct directory", None, None]
+    
+    for filepath in progress.tqdm(filepaths):
+        try:
+            image = Image.open(filepath)
+            state['files'].append(filepath)
+        except Exception as e:
+            continue
+    
+    outputs = generate_comparison(state)
+    
+    return [f"Found {len(state['files'])} images in {images_path}", *outputs]
 
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
@@ -10,18 +62,26 @@ def on_ui_tabs():
                 with gr.Column():
                     images_path = gr.Textbox(label="Images path", scale=1)
                     with gr.Row():
-                        load_images = gr.Button(value="Load", scale=1)
-                        clear_images = gr.Button(value="Clear", scale=1)
+                        load_images_btn = gr.Button(value="Load", scale=1)
+                        clear_images_btn = gr.Button(value="Clear", scale=1)
                 status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
         gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
         with gr.Row(elem_id="imagerater_image_row"):
             with gr.Column():
-                gr.Image(interactive=False, shape=(600,600), container=False)
-                gr.Button(value="Pick", shape=(600,600), container=False)
+                left_img = gr.Image(interactive=False, container=False)
+                left_btn = gr.Button(value="Pick", container=False)
+                left_val = gr.State(value=0)
             with gr.Column():
-                gr.Image(interactive=False)
-                gr.Button(value="Pick")
-        gr.Button(value="Skip", elem_id="imagerater_skipbutton")
+                right_img = gr.Image(interactive=False)
+                right_btn = gr.Button(value="Pick")
+                right_val = gr.State(value=1)
+        skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
+        state = gr.State(value={})
+    
+        load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
+        skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
+        left_btn.click(save_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
+        right_btn.click(save_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
     
     return (ui_tab, "Image Rater", "imagerater"),
 
