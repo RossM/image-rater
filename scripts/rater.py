@@ -58,6 +58,8 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
     
     filepaths = list(path.glob('*'))
     state['files'] = []
+    state['current_comparison'] = []
+    state['loading'] = True
     
     if len(filepaths) == 0:
         yield [f"No files found at {images_path}, check that you have the correct directory", None, None]
@@ -70,8 +72,14 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
         except Exception as e:
             continue
     
+    state['loading'] = False
     outputs = generate_comparison(state)
     yield [f"Loaded {len(state['files'])} images from {images_path}", *outputs]
+    
+def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
+    state['files'] = []
+    state['current_comparison'] = []
+    return ["No images loaded", None, None]
 
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
@@ -82,7 +90,7 @@ def on_ui_tabs():
                         images_path = gr.Textbox(label="Images path", scale=1)
                         with gr.Row():
                             load_images_btn = gr.Button(value="Load", scale=1)
-                            clear_images_btn = gr.Button(value="Clear", scale=1)
+                            cancel_btn = gr.Button(value="Unload", scale=1)
                     status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
             gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
@@ -97,7 +105,9 @@ def on_ui_tabs():
             skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
             state = gr.State(value={})
     
-        load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
+        load_event = load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
+        cancel_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
+        
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
         left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
