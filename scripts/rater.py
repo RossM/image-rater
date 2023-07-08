@@ -34,6 +34,10 @@ def generate_comparison(state: dict):
     state['current_comparison'] = selected = filepaths[0:2]
     for filepath in selected:
         image = Image.open(filepath)
+        
+        # Precalculate embedding
+        embedding_cache.get_embedding(str(filepath), image)
+        
         padded_image = Image.new(mode="RGB", size=(max_size, max_size), color="white")
         image.thumbnail((max_size, max_size))
         padded_image.paste(image, box=((max_size - image.width) // 2, (max_size - image.height) // 2))
