@@ -49,7 +49,10 @@ def log_and_generate(result, state: dict):
 
 def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progress()):
     if not images_path:
-        return ["You must provide the path to a directory with image files", None, None]
+        yield ["You must provide the path to a directory with image files", None, None]
+        return
+    
+    yield [f"Loading images from {images_path}", None, None]
     
     path = Path(images_path)
     
@@ -57,7 +60,8 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
     state['files'] = []
     
     if len(filepaths) == 0:
-        return [f"No files found at {images_path}, check that you have the correct directory", None, None]
+        yield [f"No files found at {images_path}, check that you have the correct directory", None, None]
+        return
     
     for filepath in progress.tqdm(filepaths):
         try:
@@ -67,8 +71,7 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
             continue
     
     outputs = generate_comparison(state)
-    
-    return [f"Found {len(state['files'])} images in {images_path}", *outputs]
+    yield [f"Loaded {len(state['files'])} images from {images_path}", *outputs]
 
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
