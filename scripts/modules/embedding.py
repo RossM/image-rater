@@ -51,7 +51,8 @@ class EmbeddingCache:
             print(e)
 
     def encode(self, tensor: Tensor):
-        return self.config + ":" + tensor.to(dtype=float).numpy().tobytes().hex()
+        assert(tensor.dtype == float or tensor.dtype == torch.float32)
+        return self.config + ":" + tensor.float().numpy().tobytes().hex()
 
     def decode(self, encoded: str):
         prefix, hex = encoded.split(':')
@@ -60,7 +61,8 @@ class EmbeddingCache:
         return Tensor(numpy.frombuffer(bytearray.fromhex(hex), dtype=float))
 
     def save_to_cache(self, filename, embedding):
-        embedding.to(dtype=float)
+        embedding = embedding.float()
+        assert(embedding.dtype == float or embedding.dtype == torch.float32)
         self.cache[filename] = embedding
         try:
             with open(self.cache_file, 'a') as f:
@@ -93,7 +95,7 @@ class EmbeddingCache:
         dataloader = DataLoader(data, batch_size=self.batch_size)
         with torch.no_grad(), torch.cuda.amp.autocast():
             for batch in progress.tqdm(dataloader, desc="Calculating embeddings", unit="batches"):
-                image_features = self.model.encode_image(batch['image'].to(device=self.device)).to(dtype=float)
+                image_features = self.model.encode_image(batch['image'].to(device=self.device)).float()
                 image_features /= image_features.norm(dim=-1, keepdim=True)
                 for (filename, embedding) in zip(batch['filename'], image_features.cpu()):
                     self.save_to_cache(filename, embedding)
@@ -103,6 +105,7 @@ class EmbeddingCache:
     def get_embedding(self, filename: str, image: Image = None):
         embedding = self.cache.get(str(filename), None)
         if embedding != None:
+            assert(embedding.dtype == float or embedding.dtype == torch.float32)
             return embedding
             
         if image == None:
@@ -111,9 +114,10 @@ class EmbeddingCache:
         image = self.preprocess(image).unsqueeze(0)
 
         with torch.no_grad(), torch.cuda.amp.autocast():
-            image_features = self.model.encode_image(image.to(device=self.device)).to(dtype=float)
+            image_features = self.model.encode_image(image.to(device=self.device)).float()
             image_features /= image_features.norm(dim=-1, keepdim=True)
 
-        embedding = image_features.flatten().cpu()
+        embedding = image_features.flatten().cpu().float()
+        assert(embedding.dtype == float or embedding.dtype == torch.float32)
         self.save_to_cache(filename, embedding)
         return embedding

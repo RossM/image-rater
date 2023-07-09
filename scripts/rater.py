@@ -167,6 +167,7 @@ def test_logistic_regression(
         choice = log_entry['choice']
         embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
         embedding_diff = embeddings[1 - choice] - embeddings[choice]
+        assert(embedding_diff.dtype == float or embedding_diff.dtype == torch.float32)
         if embedding_diff.isinf().any():
             print(f"Infinite embedding, skipping: {log_entry}")
             continue
