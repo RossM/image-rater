@@ -1,7 +1,10 @@
 import random
 import time
+import gc
 import json
 import gradio as gr
+
+import torch
 
 from modules import (devices, script_callbacks, scripts, shared, call_queue)
 from modules.ui import create_output_panel, create_refresh_button
@@ -16,7 +19,6 @@ image_rater_path = root_path / 'image_rater'
 log_path = image_rater_path / 'log'
 cache_path = image_rater_path / 'cache'
 
-embedding_config = "ViT-H-14"
 embedding_cache = None
 max_size = 800
 
@@ -24,15 +26,14 @@ log_path.mkdir(parents=True, exist_ok=True)
 cache_path.mkdir(parents=True, exist_ok=True)
 
 def change_embedding_config(config: str):
-    global embedding_cache, embedding_config
+    global embedding_cache
     if not config:
         yield "No config selected"
-    elif config == embedding_config:
+    elif embedding_cache != None and embedding_cache.config == config:
         yield f"{config} is already loaded"
     else:
-        embedding_config=config
-        yield f"Loading OpenCLIP {embedding_config}..."
-        embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
+        yield f"Loading OpenCLIP {config}..."
+        embedding_cache = EmbeddingCache(cache_path, config=config)
         yield "Done"
     
 
@@ -71,12 +72,12 @@ def log_and_generate(result, state: dict):
     
     return generate_comparison(state)
 
-def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progress()):
+def load_images(images_path: str, embedding_config: str, state: dict, progress: gr.Progress = gr.Progress()):
     if not images_path:
         yield ["You must provide the path to a directory with image files", None, None]
         return
         
-    global embedding_cache, embedding_config
+    global embedding_cache
     if not embedding_cache:
         yield [f"Loading OpenCLIP {embedding_config}...", None, None]
         embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
@@ -114,6 +115,10 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
 def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
     state['current_comparison'] = []
+    embedding_cache = None
+    gc.collect()
+    devices.torch_gc()
+    torch.cuda.empty_cache()    
     return ["No images loaded", None, None]
     
 def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
@@ -164,7 +169,7 @@ def on_ui_tabs():
                             "ViT-L-14",
                             "convnext_large_d_320",
                         ])
-                        load_model_btn = gr.Button(value="Load", scale=1)
+                        load_model_btn = gr.Button(value="Load Model", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
                     maximum_train_samples = gr.Number(label="Maximum train samples", value=100, precision=0)
                     weight_decay = gr.Number(label="Weight decay", value=0.1)
@@ -172,7 +177,7 @@ def on_ui_tabs():
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                 gr.Gallery(scale=3)
         
-        load_event = load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
+        load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
         
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
