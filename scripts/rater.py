@@ -3,7 +3,7 @@ import time
 import json
 import gradio as gr
 
-from modules import (devices, script_callbacks, scripts, shared)
+from modules import (devices, script_callbacks, scripts, shared, call_queue)
 from modules.ui import create_output_panel, create_refresh_button
 
 from PIL import Image
@@ -16,10 +16,25 @@ image_rater_path = root_path / 'image_rater'
 log_path = image_rater_path / 'log'
 cache_path = image_rater_path / 'cache'
 
+embedding_config = "ViT-H-14"
 embedding_cache = None
+max_size = 800
 
 log_path.mkdir(parents=True, exist_ok=True)
 cache_path.mkdir(parents=True, exist_ok=True)
+
+def change_embedding_config(config: str):
+    global embedding_cache, embedding_config
+    if not config:
+        yield "No config selected"
+    elif config == embedding_config:
+        yield f"{config} is already loaded"
+    else:
+        embedding_config=config
+        yield f"Loading OpenCLIP {embedding_config}..."
+        embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
+        yield "Done"
+    
 
 def generate_comparison(state: dict):
     filepaths = state['files']
@@ -28,8 +43,6 @@ def generate_comparison(state: dict):
         return None, None
         
     random.shuffle(filepaths)
-    
-    max_size = 800
     
     outputs = []
     state['current_comparison'] = selected = filepaths[0:2]
@@ -63,10 +76,10 @@ def load_images(images_path: str, state: dict, progress: gr.Progress = gr.Progre
         yield ["You must provide the path to a directory with image files", None, None]
         return
         
-    global embedding_cache
+    global embedding_cache, embedding_config
     if not embedding_cache:
-        yield ["Loading OpenCLIP ViT-H/14...", None, None]
-        embedding_cache = EmbeddingCache(cache_path)
+        yield [f"Loading OpenCLIP {embedding_config}...", None, None]
+        embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
     
     yield [f"Loading images from {images_path}...", None, None]
     
@@ -109,16 +122,9 @@ def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
         return
 
     yield "Calculating embeddings..."
-    last_progress_update = time.time()
-    for filepath in progress.tqdm(state['files']):
-        if time.time() >= last_progress_update + 1:
-            last_progress_update = time.time()
-            yield f"Calculating embeddings... {Path(filepath).name}"
-        image = Image.open(filepath)
-        embedding_cache.get_embedding(filepath, image)
-        
+    embedding_cache.precalc_embedding_batch(state['files'], progress)
     yield "Done"
-
+    
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
         with gr.Accordion(label="Config"):
@@ -134,10 +140,10 @@ def on_ui_tabs():
             with gr.Row(elem_id="imagerater_image_row"):
                 with gr.Column():
                     left_img = gr.Image(interactive=False, container=False)
-                    left_btn = gr.Button(value="Pick", container=False)
+                    left_btn = gr.Button(value="Pick")
                     left_val = gr.State(value=0)
                 with gr.Column():
-                    right_img = gr.Image(interactive=False)
+                    right_img = gr.Image(interactive=False, container=False)
                     right_btn = gr.Button(value="Pick")
                     right_val = gr.State(value=1)
             skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
@@ -147,8 +153,25 @@ def on_ui_tabs():
         with gr.Tab(label="Analyze"):
             with gr.Row():
                 calc_embeddings_btn = gr.Button(value="Calculate embeddings")
+                test_train_btn = gr.Button(value="Test logistic regression")
                 cancel_btn = gr.Button(value="Cancel", variant="stop")
-    
+            with gr.Row():
+                with gr.Column(scale=1):
+                    with gr.Row():
+                        model_dropdown = gr.Dropdown(label="Model", scale=3, value="ViT-H-14", choices=[
+                            "ViT-H-14",
+                            "DataComp-ViT-L-14",
+                            "ViT-L-14",
+                            "convnext_large_d_320",
+                        ])
+                        load_model_btn = gr.Button(value="Load", scale=1)
+                    validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
+                    maximum_train_samples = gr.Number(label="Maximum train samples", value=100, precision=0)
+                    weight_decay = gr.Number(label="Weight decay", value=0.1)
+                    optimization_steps = gr.Number(label="Optimization steps", value=100)
+                    trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
+                gr.Gallery(scale=3)
+        
         load_event = load_images_btn.click(load_images, inputs=[images_path, state], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
         
@@ -157,7 +180,10 @@ def on_ui_tabs():
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
         
         calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], outputs=[status_area])
+        #test_train_btn.click(test_fn, inputs=[state], outputs=[status_area])
         cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event], outputs=[status_area])
+        
+        load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], outputs=[status_area])
     
     return (ui_tab, "Image Rater", "imagerater"),
 
