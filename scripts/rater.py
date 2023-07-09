@@ -177,6 +177,8 @@ def test_logistic_regression(
     
     print(f"train_samples={train_samples}, validation_samples={validation_samples}")
     
+    lr_scheduler_type = "linear"
+    
     yield "Optimizing..."
     validation_losses = []
     for trial in progress.tqdm(range(trials), unit="trials"):
@@ -188,6 +190,10 @@ def test_logistic_regression(
         model.to(device=device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        if lr_scheduler_type == "linear":
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0 - epoch / optimization_steps)
+        else:
+            scheduler = None
         
         for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
             pred = model(train_input)
@@ -199,6 +205,8 @@ def test_logistic_regression(
             train_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            if scheduler:
+                scheduler.step()
         
             with torch.no_grad():
                 pred = model(validation_input)
@@ -210,7 +218,7 @@ def test_logistic_regression(
     try:
         validation_mean = torch.Tensor(validation_losses).mean()
         with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-            f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean}\n")
+            f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type}\n")
     except Exception as e:
         print(e)
     
