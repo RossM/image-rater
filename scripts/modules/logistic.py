@@ -10,7 +10,7 @@ class LogisticRegression(nn.Module):
         super().__init__()
         
         self.dim = dim
-        self.c = nn.Parameter((dim))
+        self.c = nn.Parameter(torch.zeros((dim)))
     
     def forward(self, x: Tensor):
-        return torch.sigmoid(x @ c.t())
+        return torch.sigmoid(x @ self.c.t())

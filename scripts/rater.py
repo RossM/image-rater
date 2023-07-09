@@ -5,6 +5,7 @@ import json
 import gradio as gr
 
 import torch
+import torch.nn.functional as F
 
 from modules import (devices, script_callbacks, scripts, shared, call_queue)
 from modules.ui import create_output_panel, create_refresh_button
@@ -13,6 +14,7 @@ from PIL import Image
 from pathlib import Path
 
 from scripts.modules.embedding import EmbeddingCache
+from scripts.modules.logistic import LogisticRegression
 
 root_path = Path(__file__).parents[3]
 image_rater_path = root_path / 'image_rater'
@@ -130,6 +132,90 @@ def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
     embedding_cache.precalc_embedding_batch(state['files'], progress)
     yield "Done"
     
+def test_logistic_regression(
+        validation_split_pct: float,
+        max_train_samples: int,
+        weight_decay: float,
+        optimization_steps: int,
+        trials: int,
+        lr: float,
+        state: dict,
+        progress: gr.Progress = gr.Progress(),
+    ):
+    log_entries = []
+    with open(log_path / 'default.json', 'r') as f:
+        for line in f:
+            try:
+                log_entry = json.loads(line)
+                log_entries.append(log_entry)
+            except Exception as e:
+                print(e)
+    
+    logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
+    
+    yield "Calculating embeddings..."
+    embedding_cache.precalc_embedding_batch(logged_files, progress)
+    
+    device = devices.get_device_for('image_rater')
+    
+    yield "Building input..."
+    input_tensors = []
+    for log_entry in progress.tqdm(log_entries):
+        if len(log_entry['files']) < 2:
+            print(f"Invalid log entry: {log_entry}")
+            continue
+        choice = log_entry['choice']
+        embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
+        embedding_diff = embeddings[1 - choice] - embeddings[choice]
+        if embedding_diff.isinf().any():
+            print(f"Infinite embedding, skipping: {log_entry}")
+            continue
+        input_tensors.append(embedding_diff)
+    
+    validation_samples = validation_split_pct * len(input_tensors) // 100
+    train_samples = min(len(input_tensors) - validation_samples, max_train_samples)
+    
+    print(f"train_samples={train_samples}, validation_samples={validation_samples}")
+    
+    yield "Optimizing..."
+    validation_losses = []
+    for trial in progress.tqdm(range(trials), unit="trials"):
+        random.shuffle(input_tensors)
+        train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
+        validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
+        
+        model = LogisticRegression(dim=train_input.shape[1])
+        model.to(device=device)
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        
+        for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
+            pred = model(train_input)
+            for i in range(0, pred.shape[0]):
+                if pred[i].isnan():
+                    print(f"Suspicious input: {train_input[i]}")
+                    return
+            train_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+            train_loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+        
+            with torch.no_grad():
+                pred = model(validation_input)
+                validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                if step == optimization_steps - 1:
+                    print(f"validation_loss={validation_loss}")
+                    validation_losses.append(validation_loss.item())
+    
+    try:
+        validation_mean = torch.Tensor(validation_losses).mean()
+        with open(image_rater_path / 'regression_trials.csv', 'a') as f:
+            f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean}\n")
+    except Exception as e:
+        print(e)
+    
+    yield "Done"
+    
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
         with gr.Accordion(label="Config"):
@@ -173,8 +259,9 @@ def on_ui_tabs():
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
                     maximum_train_samples = gr.Number(label="Maximum train samples", value=100, precision=0)
                     weight_decay = gr.Number(label="Weight decay", value=0.1)
-                    optimization_steps = gr.Number(label="Optimization steps", value=100)
+                    optimization_steps = gr.Number(label="Optimization steps", value=1000, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
+                    lr = gr.Number(label = "Learning rate", value=0.1)
                 gr.Gallery(scale=3)
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], outputs=[status_area, left_img, right_img])
@@ -185,8 +272,16 @@ def on_ui_tabs():
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
         
         calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], outputs=[status_area])
-        #test_train_btn.click(test_fn, inputs=[state], outputs=[status_area])
-        cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event], outputs=[status_area])
+        test_train_event = test_train_btn.click(test_logistic_regression, inputs=[
+            validation_split,
+            maximum_train_samples,
+            weight_decay,
+            optimization_steps,
+            trials,
+            lr,
+            state,
+        ], outputs=[status_area])
+        #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
         
         load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], outputs=[status_area])
     

@@ -5,6 +5,7 @@ import open_clip
 import numpy
 
 import modules.sd_models as sd
+from modules import devices
 
 from PIL import Image
 from pathlib import Path
@@ -28,7 +29,8 @@ class EmbeddingCache:
         else:
             raise ValueError(f"Unknown config {config}")
 
-        self.model = model.cuda()
+        self.device = devices.get_device_for('image_rater')
+        self.model = model.to(device=self.device)
         self.preprocess = preprocess
         self.config = config
         self.cache_file = cache_path / (config + ".json")
@@ -49,15 +51,16 @@ class EmbeddingCache:
             print(e)
 
     def encode(self, tensor: Tensor):
-        return self.config + ":" + tensor.numpy().tobytes().hex()
+        return self.config + ":" + tensor.to(dtype=float).numpy().tobytes().hex()
 
     def decode(self, encoded: str):
         prefix, hex = encoded.split(':')
         if prefix != self.config:
             raise ValueError(f"Expected OpenCLIP config '{self.config}' but got '{prefix}'")
-        return Tensor(numpy.frombuffer(bytearray.fromhex(hex)))
+        return Tensor(numpy.frombuffer(bytearray.fromhex(hex), dtype=float))
 
     def save_to_cache(self, filename, embedding):
+        embedding.to(dtype=float)
         self.cache[filename] = embedding
         try:
             with open(self.cache_file, 'a') as f:
@@ -70,6 +73,9 @@ class EmbeddingCache:
 
     def precalc_embedding_batch(self, filenames, progress):
         filenames = [filename for filename in filenames if not str(filename) in self.cache]
+        
+        if len(filenames) == 0:
+            return
 
         data = []
         for filename in progress.tqdm(filenames, desc="Loading", unit="files"):
@@ -87,25 +93,27 @@ class EmbeddingCache:
         dataloader = DataLoader(data, batch_size=self.batch_size)
         with torch.no_grad(), torch.cuda.amp.autocast():
             for batch in progress.tqdm(dataloader, desc="Calculating embeddings", unit="batches"):
-                embeddings = self.model.encode_image(batch['image'].cuda())
-                for (filename, embedding) in zip(batch['filename'], embeddings):
+                image_features = self.model.encode_image(batch['image'].to(device=self.device)).to(dtype=float)
+                image_features /= image_features.norm(dim=-1, keepdim=True)
+                for (filename, embedding) in zip(batch['filename'], image_features.cpu()):
                     self.save_to_cache(filename, embedding)
                 
         sd.load_model()
 
-    def get_embedding(self, filename: str, image: Image):
+    def get_embedding(self, filename: str, image: Image = None):
         embedding = self.cache.get(str(filename), None)
         if embedding != None:
-            print(f"Found cached embedding for {filename}")
             return embedding
+            
+        if image == None:
+            image = Image.load(filename)
 
         image = self.preprocess(image).unsqueeze(0)
 
         with torch.no_grad(), torch.cuda.amp.autocast():
-            image_features = self.model.encode_image(image.cuda())
+            image_features = self.model.encode_image(image.to(device=self.device)).to(dtype=float)
             image_features /= image_features.norm(dim=-1, keepdim=True)
 
         embedding = image_features.flatten().cpu()
-        print(f"Calculated embedding for {filename}")
         self.save_to_cache(filename, embedding)
         return embedding
