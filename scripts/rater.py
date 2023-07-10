@@ -153,25 +153,28 @@ def test_logistic_regression(
     
     logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
     
-    yield "Calculating embeddings..."
+    yield ["Calculating embeddings...", None]
     embedding_cache.precalc_embedding_batch(logged_files, progress)
     
     device = devices.get_device_for('image_rater')
     
-    yield "Building input..."
+    yield ["Building input...", None]
     input_tensors = []
     for log_entry in progress.tqdm(log_entries):
         if len(log_entry['files']) < 2:
             print(f"Invalid log entry: {log_entry}")
             continue
         choice = log_entry['choice']
-        embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
-        embedding_diff = embeddings[1 - choice] - embeddings[choice]
-        assert(embedding_diff.dtype == float or embedding_diff.dtype == torch.float32)
-        if embedding_diff.isinf().any():
-            print(f"Infinite embedding, skipping: {log_entry}")
-            continue
-        input_tensors.append(embedding_diff)
+        try:
+            embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
+            embedding_diff = embeddings[1 - choice] - embeddings[choice]
+            assert(embedding_diff.dtype == float or embedding_diff.dtype == torch.float32)
+            if embedding_diff.isinf().any():
+                print(f"Infinite embedding, skipping: {log_entry}")
+                continue
+            input_tensors.append(embedding_diff)
+        except Exception as e:
+            print(e)
     
     validation_samples = validation_split_pct * len(input_tensors) // 100
     train_samples = min(len(input_tensors) - validation_samples, max_train_samples)
@@ -180,8 +183,9 @@ def test_logistic_regression(
     
     lr_scheduler_type = "linear"
     
-    yield "Optimizing..."
+    yield ["Optimizing...", None]
     validation_losses = []
+    score_embeddings = []
     for trial in progress.tqdm(range(trials), unit="trials"):
         random.shuffle(input_tensors)
         train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
@@ -212,18 +216,26 @@ def test_logistic_regression(
             with torch.no_grad():
                 pred = model(validation_input)
                 validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
-                if step == optimization_steps - 1:
-                    print(f"validation_loss={validation_loss}")
-                    validation_losses.append(validation_loss.item())
+ 
+        print(f"validation_loss={validation_loss}")
+        validation_losses.append(validation_loss.item())
+        score_embeddings.append(model.c.data.clone().detach())
+        
+    scores = {}
+    with torch.no_grad():
+        score_embedding = torch.stack(score_embeddings).mean(dim=0).cpu()
+        topfiles = list(filename for filename in logged_files if filename in embedding_cache.cache)
+        topfiles.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
     
-    try:
-        validation_mean = torch.Tensor(validation_losses).mean()
-        with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-            f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type}\n")
-    except Exception as e:
-        print(e)
+    if validation_samples > 0:
+        try:
+            validation_mean = torch.Tensor(validation_losses).mean()
+            with open(image_rater_path / 'regression_trials.csv', 'a') as f:
+                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type}\n")
+        except Exception as e:
+            print(e)
     
-    yield "Done"
+    yield ["Done", topfiles[0:99]]
     
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
@@ -271,7 +283,7 @@ def on_ui_tabs():
                     optimization_steps = gr.Number(label="Optimization steps", value=1000, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.1)
-                gr.Gallery(scale=3)
+                test_gallery = gr.Gallery(scale=3, preview=True, width=600, height=600, object_fit="scale-down")
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
@@ -289,7 +301,7 @@ def on_ui_tabs():
             trials,
             lr,
             state,
-        ], outputs=[status_area])
+        ], outputs=[status_area, test_gallery])
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
         
         load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], outputs=[status_area])
