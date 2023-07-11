@@ -25,7 +25,7 @@ class EmbeddingCache:
         elif config == 'ViT-H-14':
             model, _, preprocess = open_clip.create_model_and_transforms('ViT-H-14', pretrained='laion2b_s32b_b79k')
             batch_size = 4
-            embed_length = 768
+            embed_length = 1024
         elif config == 'convnext_large_d_320':
             model, _, preprocess = open_clip.create_model_and_transforms('convnext_large_d_320', pretrained='laion2b_s29b_b131k_ft_soup')
             batch_size = 16
