@@ -27,16 +27,16 @@ max_size = 800
 log_path.mkdir(parents=True, exist_ok=True)
 cache_path.mkdir(parents=True, exist_ok=True)
 
-def change_embedding_config(config: str):
+def change_embedding_config(config: str, progress: gr.Progress = gr.Progress()):
     global embedding_cache
     if not config:
-        yield "No config selected"
+        return "No config selected"
     elif embedding_cache != None and embedding_cache.config == config:
-        yield f"{config} is already loaded"
+        return f"{config} is already loaded"
     else:
-        yield f"Loading OpenCLIP {config}..."
+        progress(0, f"Loading OpenCLIP {config}")
         embedding_cache = EmbeddingCache(cache_path, config=config)
-        yield "Done"
+        return "OpenCLIP loaded"
     
 
 def generate_comparison(state: dict):
@@ -76,15 +76,12 @@ def log_and_generate(result, state: dict):
 
 def load_images(images_path: str, embedding_config: str, state: dict, progress: gr.Progress = gr.Progress()):
     if not images_path:
-        yield ["You must provide the path to a directory with image files", None, None]
-        return
+        return ["You must provide the path to a directory with image files", None, None]
         
     global embedding_cache
     if not embedding_cache:
-        yield [f"Loading OpenCLIP {embedding_config}...", None, None]
+        progress(0, f"Loading OpenCLIP {embedding_config}")
         embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
-    
-    yield [f"Loading images from {images_path}...", None, None]
     
     path = Path(images_path)
     
@@ -94,25 +91,22 @@ def load_images(images_path: str, embedding_config: str, state: dict, progress: 
     state['loading'] = True
     
     if len(filepaths) == 0:
-        yield [f"No files found at {images_path}, check that you have the correct directory", None, None]
-        return
+        return [f"No files found at {images_path}, check that you have the correct directory", None, None]
     
-    for filepath in progress.tqdm(filepaths):
+    for filepath in progress.tqdm(filepaths, desc="Checking files", unit="files"):
         try:
             if filepath.suffix == '.txt':
                 continue
             image = Image.open(filepath)
             filepath = str(filepath)
             state['files'].append(filepath)
-            #embed = embedding_cache.get_embedding(filepath, image)
-            #print(f"{filepath}: {embed}")
         except Exception as e:
             print(e)
             continue
     
     state['loading'] = False
     outputs = generate_comparison(state)
-    yield [f"Loaded {len(state['files'])} images from {images_path}", *outputs]
+    return [f"Loaded {len(state['files'])} images from {images_path}", *outputs]
     
 def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
@@ -125,12 +119,10 @@ def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     
 def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
     if len(state['files']) == 0:
-        yield "No files loaded"
-        return
+        return "No files loaded"
 
-    yield "Calculating embeddings..."
     embedding_cache.precalc_embedding_batch(state['files'], progress)
-    yield "Done"
+    return "Done"
     
 def test_logistic_regression(
         validation_split_pct: float,
@@ -144,7 +136,7 @@ def test_logistic_regression(
     ):
     log_entries = []
     with open(log_path / 'default.json', 'r') as f:
-        for line in f:
+        for line in progress.tqdm(f, desc="Reading log", unit="lines"):
             try:
                 log_entry = json.loads(line)
                 log_entries.append(log_entry)
@@ -153,14 +145,12 @@ def test_logistic_regression(
     
     logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
     
-    yield ["Calculating embeddings...", None]
     embedding_cache.precalc_embedding_batch(logged_files, progress)
     
     device = devices.get_device_for('image_rater')
     
-    yield ["Building input...", None]
     input_tensors = []
-    for log_entry in progress.tqdm(log_entries):
+    for log_entry in progress.tqdm(log_entries, desc="Building input", unit="examples"):
         if len(log_entry['files']) < 2:
             print(f"Invalid log entry: {log_entry}")
             continue
@@ -183,10 +173,9 @@ def test_logistic_regression(
     
     lr_scheduler_type = "linear"
     
-    yield ["Optimizing...", None]
     validation_losses = []
     score_embeddings = []
-    for trial in progress.tqdm(range(trials), unit="trials"):
+    for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
         random.shuffle(input_tensors)
         train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
         validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
@@ -236,7 +225,7 @@ def test_logistic_regression(
         except Exception as e:
             print(e)
     
-    yield ["Done", topfiles[0:10]]
+    return ["Done", topfiles[0:10]]
     
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
@@ -285,6 +274,10 @@ def on_ui_tabs():
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.1)
                 test_gallery = gr.Gallery(scale=3, preview=True, width=600, height=600, object_fit="scale-down")
+        with gr.Tab(label="Preprocess"):
+            with gr.Row():
+                preprocess_input_path = gr.Textbox(label="Input path", scale=1)
+                preprocess_output_path = gr.Textbox(label="Output path", scale=1)
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
