@@ -224,7 +224,8 @@ def test_logistic_regression(
     scores = {}
     with torch.no_grad():
         score_embedding = torch.stack(score_embeddings).mean(dim=0).cpu()
-        topfiles = list(filename for filename in logged_files if filename in embedding_cache.cache)
+        candidate_files = state['files'] if len(state['files']) > 0 else logged_files
+        topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache)
         topfiles.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
     
     if validation_samples > 0:
@@ -235,7 +236,7 @@ def test_logistic_regression(
         except Exception as e:
             print(e)
     
-    yield ["Done", topfiles[0:99]]
+    yield ["Done", topfiles[0:10]]
     
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
