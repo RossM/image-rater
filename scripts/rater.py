@@ -225,7 +225,7 @@ def test_logistic_regression(
         except Exception as e:
             print(e)
     
-    return ["Done", topfiles[0:10]]
+    return ["Done", topfiles[0:12]]
     
 def on_ui_tabs():
     with gr.Blocks() as ui_tab:
@@ -273,20 +273,22 @@ def on_ui_tabs():
                     optimization_steps = gr.Number(label="Optimization steps", value=1000, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.1)
-                test_gallery = gr.Gallery(scale=3, preview=True, width=600, height=600, object_fit="scale-down")
+                test_gallery = gr.Gallery(label="Preview", scale=3, preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
-            with gr.Row():
-                preprocess_input_path = gr.Textbox(label="Input path", scale=1)
-                preprocess_output_path = gr.Textbox(label="Output path", scale=1)
+            with gr.Column():
+                preprocess_input_path = gr.Textbox(label="Source directory", scale=1)
+                preprocess_output_path = gr.Textbox(label="Destination directory", scale=1)
+                with gr.Row():
+                    preprocess_random_crops = gr.Checkbox(label="Create random crops")
         
-        load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], outputs=[status_area, left_img, right_img])
-        unload_btn.click(clear_images, cancels=[load_event], inputs=[state], outputs=[status_area, left_img, right_img])
+        load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
+        unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
         left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
         
-        calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], outputs=[status_area])
+        calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], status_tracker=[status_area], outputs=[status_area])
         test_train_event = test_train_btn.click(test_logistic_regression, inputs=[
             validation_split,
             maximum_train_samples,
@@ -295,10 +297,10 @@ def on_ui_tabs():
             trials,
             lr,
             state,
-        ], outputs=[status_area, test_gallery])
+        ], status_tracker=[status_area], outputs=[status_area, test_gallery])
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
         
-        load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], outputs=[status_area])
+        load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], status_tracker=[status_area], outputs=[status_area])
     
     return (ui_tab, "Image Rater", "imagerater"),
 
