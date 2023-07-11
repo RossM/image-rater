@@ -74,14 +74,14 @@ def log_and_generate(result, state: dict):
     
     return generate_comparison(state)
 
-def load_images(images_path: str, embedding_config: str, state: dict, progress: gr.Progress = gr.Progress()):
+def load_images(images_path: str, config: str, state: dict, progress: gr.Progress = gr.Progress()):
     if not images_path:
         return ["You must provide the path to a directory with image files", None, None]
         
     global embedding_cache
-    if not embedding_cache:
-        progress(0, f"Loading OpenCLIP {embedding_config}")
-        embedding_cache = EmbeddingCache(cache_path, config=embedding_config)
+    if not embedding_cache or embedding_cache.config != config:
+        progress(0, f"Loading OpenCLIP {config}")
+        embedding_cache = EmbeddingCache(cache_path, config=config)
     
     path = Path(images_path)
     
@@ -117,14 +117,20 @@ def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     torch.cuda.empty_cache()    
     return ["No images loaded", None, None]
     
-def calculate_embeddings(state: dict, progress: gr.Progress = gr.Progress()):
+def calculate_embeddings(config: str, state: dict, progress: gr.Progress = gr.Progress()):
     if len(state['files']) == 0:
         return "No files loaded"
 
+    global embedding_cache
+    if not embedding_cache or embedding_cache.config != config:
+        progress(0, f"Loading OpenCLIP {config}")
+        embedding_cache = EmbeddingCache(cache_path, config=config)
+    
     embedding_cache.precalc_embedding_batch(state['files'], progress)
     return "Done"
     
 def test_logistic_regression(
+        config: str,
         validation_split_pct: float,
         max_train_samples: int,
         weight_decay: float,
@@ -134,6 +140,12 @@ def test_logistic_regression(
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
+
+    global embedding_cache
+    if not embedding_cache or embedding_cache.config != config:
+        progress(0, f"Loading OpenCLIP {config}")
+        embedding_cache = EmbeddingCache(cache_path, config=config)
+
     log_entries = []
     with open(log_path / 'default.json', 'r') as f:
         for line in progress.tqdm(f, desc="Reading log", unit="lines"):
@@ -288,8 +300,9 @@ def on_ui_tabs():
         left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
         right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
         
-        calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[state], status_tracker=[status_area], outputs=[status_area])
+        calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[model_dropdown, state], status_tracker=[status_area], outputs=[status_area])
         test_train_event = test_train_btn.click(test_logistic_regression, inputs=[
+            model_dropdown,
             validation_split,
             maximum_train_samples,
             weight_decay,
