@@ -244,11 +244,12 @@ def on_ui_tabs():
         with gr.Accordion(label="Config"):
             with gr.Row():
                 with gr.Column():
-                    images_path = gr.Textbox(label="Images path", scale=1)
+                    images_path = gr.Textbox(label="Images path")
                     with gr.Row():
-                        load_images_btn = gr.Button(value="Load", scale=1)
-                        unload_btn = gr.Button(value="Unload", scale=1)
-                status_area = gr.Textbox(label="Status", interactive=False, scale=2, lines=3)
+                        load_images_btn = gr.Button(value="Load")
+                        unload_btn = gr.Button(value="Unload")
+                with gr.Column():
+                    status_area = gr.Textbox(label="Status", interactive=False, lines=3)
         with gr.Tab(label="Rate"):
             gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
@@ -280,18 +281,47 @@ def on_ui_tabs():
                         ])
                         load_model_btn = gr.Button(value="Load Model", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
-                    maximum_train_samples = gr.Number(label="Maximum train samples", value=100, precision=0)
-                    weight_decay = gr.Number(label="Weight decay", value=0.1)
-                    optimization_steps = gr.Number(label="Optimization steps", value=1000, precision=0)
+                    maximum_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
+                    weight_decay = gr.Number(label="Weight decay", value=2)
+                    optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
-                    lr = gr.Number(label = "Learning rate", value=0.1)
-                test_gallery = gr.Gallery(label="Preview", scale=3, preview=True).style(columns=4, object_fit='contain')
+                    lr = gr.Number(label = "Learning rate", value=0.2)
+                test_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
-            with gr.Column():
-                preprocess_input_path = gr.Textbox(label="Source directory", scale=1)
-                preprocess_output_path = gr.Textbox(label="Destination directory", scale=1)
-                with gr.Row():
-                    preprocess_random_crops = gr.Checkbox(label="Create random crops")
+            with gr.Row():
+                with gr.Column():
+                    preprocess_input_path = gr.Textbox(label="Source directory", scale=1)
+                    preprocess_output_path = gr.Textbox(label="Destination directory", scale=1)
+                    preprocess_maximum = gr.Number(label="Maximum output images", value=1000, precision=0)
+                    with gr.Row():
+                        preprocess_dimension = gr.Number(label="Output dimension", value=512, precision=0)
+                        preprocess_resize_mode=gr.Dropdown(label="Resize mode", value="Don't resize", choices=[
+                            "Don't resize",
+                            "By area",
+                            "By largest dimension",
+                            "By smallest dimension",
+                        ])
+                    with gr.Row():
+                        preprocess_crop_size = gr.Number(label="Crop size", value=512, precision=0)
+                        preprocess_num_crops = gr.Slider(label="Number of crops", value=4, minimum=1, maximum=10)
+                    with gr.Row():
+                        with gr.Column(scale=9):
+                            preprocess_filter_prompt_include = gr.Textbox(label="Include images matching", interactive=True)
+                        with gr.Column(scale=1, min_width=160):
+                            preprocess_filter_prompt_include_mode = gr.Radio(label="Match type", value="Any", choices=["Any", "All"], interactive=True)
+                    with gr.Row():
+                        with gr.Column(scale=9):
+                            preprocess_filter_prompt_exclude = gr.Textbox(label="Exclude images matching", interactive=True)
+                        with gr.Column(scale=1, min_width=160):
+                            preprocess_filter_prompt_exclude_mode = gr.Radio(label="Match type", value="Any", choices=["Any", "All"], interactive=True)
+                    preprocess_filter_confidence = gr.Slider(label="Filter confidence threshold", value=0.5, minimum=0, maximum=1, step=0.01)
+                    with gr.Row():
+                        preprocess_random_crops = gr.Checkbox(label="Create random crops")
+                        preprocess_random_crops = gr.Checkbox(label="Encourage diversity")
+                        preprocess_use_hardlink = gr.Checkbox(label="Use hardlinks where possible")
+                with gr.Column():
+                    gr.Button(value="Preprocess images")
+                    gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
