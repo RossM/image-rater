@@ -7,7 +7,7 @@ import gradio as gr
 import torch
 import torch.nn.functional as F
 
-from modules import (devices, script_callbacks, scripts, shared, call_queue)
+from modules import devices, script_callbacks, scripts, shared, call_queue
 from modules.ui import create_output_panel, create_refresh_button
 
 from PIL import Image
@@ -27,6 +27,9 @@ max_size = 800
 log_path.mkdir(parents=True, exist_ok=True)
 cache_path.mkdir(parents=True, exist_ok=True)
 
+def safe_filename(s: str):
+    return "".join(x if x.isalnum() or x == " " else "_" for x in s)
+
 def change_embedding_config(config: str, progress: gr.Progress = gr.Progress()):
     global embedding_cache
     if not config:
@@ -37,7 +40,6 @@ def change_embedding_config(config: str, progress: gr.Progress = gr.Progress()):
         progress(0, f"Loading OpenCLIP {config}")
         embedding_cache = EmbeddingCache(cache_path, config=config)
         return "OpenCLIP loaded"
-    
 
 def generate_comparison(state: dict):
     filepaths = state['files']
@@ -62,11 +64,8 @@ def generate_comparison(state: dict):
         
     return outputs
 
-def log_and_generate(result, state: dict):
-    print(f"result={result}")
-    print(f"log_path={log_path}")
-    
-    with open(log_path / 'default.json', 'a') as f:
+def log_and_generate(result, prompt_file, state: dict):
+    with open(log_path / (safe_filename(prompt_file) + '.json'), 'a') as f:
         f.write(json.dumps({
             'files': state['current_comparison'],
             'choice': result,
@@ -131,6 +130,7 @@ def calculate_embeddings(config: str, state: dict, progress: gr.Progress = gr.Pr
     
 def test_logistic_regression(
         config: str,
+        prompt_file: str,
         validation_split_pct: float,
         max_train_samples: int,
         weight_decay: float,
@@ -147,7 +147,7 @@ def test_logistic_regression(
         embedding_cache = EmbeddingCache(cache_path, config=config)
 
     log_entries = []
-    with open(log_path / 'default.json', 'r') as f:
+    with open(log_path / (safe_filename(prompt_file) + '.json'), 'r') as f:
         for line in progress.tqdm(f, desc="Reading log", unit="lines"):
             try:
                 log_entry = json.loads(line)
@@ -240,6 +240,14 @@ def test_logistic_regression(
     return ["Done", topfiles[0:12]]
     
 def on_ui_tabs():
+    def get_prompts():
+        global prompt_options
+        prompts = set(filename.stem for filename in log_path.glob('*.json'))
+        prompts.add("default")
+        prompt_options = list(prompts)
+        prompt_options.sort()
+    get_prompts()
+
     with gr.Blocks() as ui_tab:
         with gr.Accordion(label="Config"):
             with gr.Row():
@@ -248,10 +256,13 @@ def on_ui_tabs():
                     with gr.Row():
                         load_images_btn = gr.Button(value="Load")
                         unload_btn = gr.Button(value="Unload")
+                    with gr.Row():
+                        prompt_dropdown = gr.Dropdown(label="Rating prompt", value="default", choices=prompt_options, interactive=True)
+                        create_refresh_button(prompt_dropdown, get_prompts, lambda: {"choices": prompt_options, "value": prompt_dropdown.value}, "prompt_dropdown_refresh")
                 with gr.Column():
-                    status_area = gr.Textbox(label="Status", interactive=False, lines=3)
+                    status_area = gr.Textbox(label="Status", interactive=False, lines=2)
         with gr.Tab(label="Rate"):
-            gr.HTML("Pick the better image!", elem_id="imagerater_calltoaction")
+            prompt_html = gr.HTML(value="Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
                 with gr.Column():
                     left_img = gr.Image(interactive=False, container=False)
@@ -273,13 +284,13 @@ def on_ui_tabs():
             with gr.Row():
                 with gr.Column(scale=1):
                     with gr.Row():
-                        model_dropdown = gr.Dropdown(label="Model", scale=3, value="ViT-H-14", choices=[
+                        model_dropdown = gr.Dropdown(label="OpenCLIP Model", scale=3, value="ViT-H-14", choices=[
                             "ViT-H-14",
                             "DataComp-ViT-L-14",
                             "ViT-L-14",
                             "convnext_large_d_320",
                         ])
-                        load_model_btn = gr.Button(value="Load Model", scale=1)
+                        load_model_btn = gr.Button(value="Load CLIP", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
                     maximum_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
                     weight_decay = gr.Number(label="Weight decay", value=2)
@@ -290,17 +301,21 @@ def on_ui_tabs():
         with gr.Tab(label="Preprocess"):
             with gr.Row():
                 with gr.Column():
-                    preprocess_input_path = gr.Textbox(label="Source directory", scale=1)
-                    preprocess_output_path = gr.Textbox(label="Destination directory", scale=1)
+                    preprocess_input_path = gr.Textbox(label="Source directory")
+                    preprocess_input_include_subdirectories = gr.Checkbox(label="Include subdirectories")
+                    preprocess_output_path = gr.Textbox(label="Destination directory")
                     preprocess_maximum = gr.Number(label="Maximum output images", value=1000, precision=0)
                     with gr.Row():
-                        preprocess_dimension = gr.Number(label="Output dimension", value=512, precision=0)
-                        preprocess_resize_mode=gr.Dropdown(label="Resize mode", value="Don't resize", choices=[
-                            "Don't resize",
-                            "By area",
-                            "By largest dimension",
-                            "By smallest dimension",
-                        ])
+                        with gr.Column(scale=2):
+                            preprocess_dimension = gr.Number(label="Output dimension", value=512, precision=0)
+                        with gr.Column(scale=3, min_width=480):
+                            preprocess_resize_mode=gr.Radio(label="Resize mode", value="Don't resize", choices=[
+                                "Don't resize",
+                                "Area",
+                                "Largest dimension",
+                                "Smallest dimension",
+                            ])
+                    preprocess_random_crops = gr.Checkbox(label="Create random crops")
                     with gr.Row():
                         preprocess_crop_size = gr.Number(label="Crop size", value=512, precision=0)
                         preprocess_num_crops = gr.Slider(label="Number of crops", value=4, minimum=1, maximum=10)
@@ -315,24 +330,35 @@ def on_ui_tabs():
                         with gr.Column(scale=1, min_width=160):
                             preprocess_filter_prompt_exclude_mode = gr.Radio(label="Match type", value="Any", choices=["Any", "All"], interactive=True)
                     preprocess_filter_confidence = gr.Slider(label="Filter confidence threshold", value=0.5, minimum=0, maximum=1, step=0.01)
+                    preprocess_caption_txt = gr.Radio(label="Existing caption txt", value="Copy", choices=["Ignore", "Copy", "Append", "Prepend"], interactive=True)
                     with gr.Row():
-                        preprocess_random_crops = gr.Checkbox(label="Create random crops")
                         preprocess_random_crops = gr.Checkbox(label="Encourage diversity")
+                        preprocess_caption_blip2 = gr.Checkbox(label="Caption using BLIP2")
+                        preprocess_caption_wd14 = gr.Checkbox(label="Caption using Waifu Diffusion 1.4 tagger")
                         preprocess_use_hardlink = gr.Checkbox(label="Use hardlinks where possible")
                 with gr.Column():
                     gr.Button(value="Preprocess images")
                     gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         
+        def prompt_dropdown_change(prompt):
+            if prompt == "default":
+                return "Pick the better image!"
+            else:
+                return f"Pick the more {prompt} image!"
+        prompt_dropdown.select(prompt_dropdown_change, inputs=[prompt_dropdown], outputs=[prompt_html])
+        prompt_dropdown.blur(prompt_dropdown_change, inputs=[prompt_dropdown], outputs=[prompt_html])
+        
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         
         skip_btn.click(generate_comparison, inputs=[state], outputs=[left_img, right_img])
-        left_btn.click(log_and_generate, inputs=[left_val, state], outputs=[left_img, right_img])
-        right_btn.click(log_and_generate, inputs=[right_val, state], outputs=[left_img, right_img])
+        left_btn.click(log_and_generate, inputs=[left_val, prompt_dropdown, state], outputs=[left_img, right_img])
+        right_btn.click(log_and_generate, inputs=[right_val, prompt_dropdown, state], outputs=[left_img, right_img])
         
         calc_embeddings_event = calc_embeddings_btn.click(calculate_embeddings, inputs=[model_dropdown, state], status_tracker=[status_area], outputs=[status_area])
         test_train_event = test_train_btn.click(test_logistic_regression, inputs=[
             model_dropdown,
+            prompt_dropdown,
             validation_split,
             maximum_train_samples,
             weight_decay,
