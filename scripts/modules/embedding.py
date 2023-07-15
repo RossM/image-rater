@@ -85,34 +85,45 @@ class EmbeddingCache:
 
     def precalc_embedding_batch(self, filenames, progress):
         filenames = [filename for filename in filenames if not str(filename) in self.cache]
-        
+
         if len(filenames) == 0:
             return
 
         data = []
-        for filename in progress.tqdm(filenames, desc="Loading", unit="files"):
+        for filename in progress.tqdm(filenames, desc="Checking files", unit="files"):
             try:
                 image = Image.open(filename)
-                data.append({"filename": filename, "image": image})
+                data.append({"filename": filename})
+                del image
             except Exception as e:
                 print(e)
-        
+
         if len(data) == 0:
             return
 
-        for item in progress.tqdm(data, desc="Preprocessing", unit="files"):
-            item['image'] = self.preprocess(item['image'])
-        
         sd.unload_model_weights()
 
-        dataloader = DataLoader(data, batch_size=self.batch_size)
-        with torch.no_grad(), torch.cuda.amp.autocast():
-            for batch in progress.tqdm(dataloader, desc="Calculating embeddings", unit="batches"):
-                image_features = self.model.encode_image(batch['image'].to(device=self.device)).float()
+        for batch_start in progress.tqdm(range(0, len(data), self.batch_size), desc="Processing", unit="batches"):
+            batch_data = data[batch_start:batch_start+self.batch_size]
+
+            for item in batch_data:
+                image = Image.open(item['filename'])
+                item['image'] = self.preprocess(image)
+                del image
+
+            batch = torch.stack([item['image'] for item in batch_data])
+            batch_filenames = [item['filename'] for item in batch_data]
+
+            with torch.no_grad(), torch.cuda.amp.autocast():
+                image_features = self.model.encode_image(batch.to(device=self.device)).float()
                 image_features /= image_features.norm(dim=-1, keepdim=True)
-                for (filename, embedding) in zip(batch['filename'], image_features.cpu()):
+                for (filename, embedding) in zip(batch_filenames, image_features.cpu()):
                     self.save_to_cache(filename, embedding)
-                
+
+            for item in batch_data:
+                del item['image']
+
+        progress(1, "Reloading stable diffusion model")
         sd.load_model()
 
     def get_embedding(self, filename: str, image: Image = None):
