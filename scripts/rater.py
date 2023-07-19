@@ -54,6 +54,7 @@ def generate_comparison(state: dict):
         candidates.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
         print(candidates)
         selected = candidates[0:2]
+        random.shuffle(selected)
     else:
         selected = filepaths[0:2]
     
