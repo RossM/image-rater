@@ -138,6 +138,7 @@ def test_logistic_regression(
         optimization_steps: int,
         trials: int,
         lr: float,
+        goodness_bias: float,
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
@@ -163,6 +164,7 @@ def test_logistic_regression(
     device = devices.get_device_for('image_rater')
     
     input_tensors = []
+    weight_tensors = []
     for log_entry in progress.tqdm(log_entries, desc="Building input", unit="examples"):
         if len(log_entry['files']) < 2:
             print(f"Invalid log entry: {log_entry}")
@@ -171,11 +173,12 @@ def test_logistic_regression(
         try:
             embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
             embedding_diff = embeddings[1 - choice] - embeddings[choice]
+            embedding_mean = (embeddings[0] + embeddings[1]) / 2
             assert(embedding_diff.dtype == float or embedding_diff.dtype == torch.float32)
             if embedding_diff.isinf().any():
                 print(f"Infinite embedding, skipping: {log_entry}")
                 continue
-            input_tensors.append(embedding_diff)
+            input_tensors.append(torch.stack([embedding_diff, embedding_mean]))
         except Exception as e:
             print(e)
     
@@ -193,7 +196,7 @@ def test_logistic_regression(
         train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
         validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
         
-        model = LogisticRegression(dim=train_input.shape[1])
+        model = LogisticRegression(dim=train_input.shape[2])
         model.to(device=device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
@@ -204,12 +207,15 @@ def test_logistic_regression(
             scheduler = None
         
         for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
-            pred = model(train_input)
+            pred = model(train_input[:,0,:])
             for i in range(0, pred.shape[0]):
                 if pred[i].isnan():
                     print(f"Suspicious input: {train_input[i]}")
                     return
-            train_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+            # Goodness bias controls how much comparisons between high-scoring examples are
+            # weighted over other examples in computing loss. If set to 0, all examples count equally.
+            example_weights = F.softmax(goodness_bias * train_input[:,1,:] @ model.c.t()).detach()
+            train_loss = ((pred ** 2) * example_weights).sum()
             train_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -217,7 +223,7 @@ def test_logistic_regression(
                 scheduler.step()
         
             with torch.no_grad():
-                pred = model(validation_input)
+                pred = model(validation_input[:,0,:])
                 validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
  
         print(f"validation_loss={validation_loss}")
@@ -235,7 +241,8 @@ def test_logistic_regression(
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type},{optimizer.__class__}\n")
+                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps}," + 
+                        f"{trials},{validation_mean},{lr_scheduler_type},{optimizer.__class__},{goodness_bias}\n")
         except Exception as e:
             print(e)
     
@@ -299,6 +306,7 @@ def on_ui_tabs():
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.2)
+                    goodness_bias = gr.Number(label = "Goodness bias", value=0)
                 test_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
             with gr.Row():
@@ -367,6 +375,7 @@ def on_ui_tabs():
             optimization_steps,
             trials,
             lr,
+            goodness_bias,
             state,
         ], status_tracker=[status_area], outputs=[status_area, test_gallery])
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
