@@ -110,6 +110,7 @@ def load_images(images_path: str, config: str, state: dict, progress: gr.Progres
 def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
     state['current_comparison'] = []
+    global embedding_cache
     embedding_cache = None
     gc.collect()
     devices.torch_gc()
