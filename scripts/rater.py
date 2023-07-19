@@ -196,7 +196,8 @@ def test_logistic_regression(
         model = LogisticRegression(dim=train_input.shape[1])
         model.to(device=device)
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
+        #optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
         if lr_scheduler_type == "linear":
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0 - epoch / optimization_steps)
         else:
@@ -234,7 +235,7 @@ def test_logistic_regression(
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type}\n")
+                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},{trials},{validation_mean},{lr_scheduler_type},{optimizer.__class__}\n")
         except Exception as e:
             print(e)
     
