@@ -48,9 +48,17 @@ def generate_comparison(state: dict):
         return None, None
         
     random.shuffle(filepaths)
+    score_embedding = state.get('score_embedding', None)
+    if state['opt_prefer_high_scoring'] and score_embedding != None:
+        candidates = filepaths[0:5]
+        candidates.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
+        print(candidates)
+        selected = candidates[0:2]
+    else:
+        selected = filepaths[0:2]
     
     outputs = []
-    state['current_comparison'] = selected = filepaths[0:2]
+    state['current_comparison'] = selected
     for filepath in selected:
         image = Image.open(filepath)
         
@@ -81,6 +89,7 @@ def load_images(images_path: str, config: str, state: dict, progress: gr.Progres
     if not embedding_cache or embedding_cache.config != config:
         progress(0, f"Loading OpenCLIP {config}")
         embedding_cache = EmbeddingCache(cache_path, config=config)
+        del state['score_embedding']
     
     path = Path(images_path)
     
@@ -112,6 +121,7 @@ def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['current_comparison'] = []
     global embedding_cache
     embedding_cache = None
+    del state['score_embedding']
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()    
@@ -233,6 +243,7 @@ def test_logistic_regression(
     scores = {}
     with torch.no_grad():
         score_embedding = torch.stack(score_embeddings).mean(dim=0).cpu()
+        state['score_embedding'] = score_embedding
         candidate_files = state['files'] if len(state['files']) > 0 else logged_files
         topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache)
         topfiles.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
@@ -270,6 +281,8 @@ def on_ui_tabs():
                         create_refresh_button(prompt_dropdown, get_prompts, lambda: {"choices": prompt_options, "value": prompt_dropdown.value}, "prompt_dropdown_refresh")
                 with gr.Column():
                     status_area = gr.Textbox(label="Status", interactive=False, lines=2)
+                    with gr.Row():
+                        prefer_high_scoring = gr.Checkbox(label="Prefer high-scoring images", value=True, interactive=True)
         with gr.Tab(label="Rate"):
             prompt_html = gr.HTML(value="Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
@@ -283,7 +296,8 @@ def on_ui_tabs():
                     right_val = gr.State(value=1)
             skip_btn = gr.Button(value="Skip", elem_id="imagerater_skipbutton")
             state = gr.State(value={
-                "files": []
+                "files": [],
+                "opt_prefer_high_scoring": True,
             })
         with gr.Tab(label="Analyze"):
             with gr.Row():
@@ -357,6 +371,10 @@ def on_ui_tabs():
                 return f"Pick the more {prompt} image!"
         prompt_dropdown.select(prompt_dropdown_change, inputs=[prompt_dropdown], outputs=[prompt_html])
         prompt_dropdown.blur(prompt_dropdown_change, inputs=[prompt_dropdown], outputs=[prompt_html])
+        
+        def prefer_high_scoring_change(val, state):
+            state['opt_prefer_high_scoring'] = val
+        prefer_high_scoring.change(prefer_high_scoring_change, inputs=[prefer_high_scoring, state])
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
