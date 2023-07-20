@@ -90,12 +90,11 @@ def load_images(images_path: str, config: str, state: dict, progress: gr.Progres
     if not embedding_cache or embedding_cache.config != config:
         progress(0, f"Loading OpenCLIP {config}")
         embedding_cache = EmbeddingCache(cache_path, config=config)
-        del state['score_embedding']
+        state['score_embedding'] = None
     
     path = Path(images_path)
     
     filepaths = list(path.glob('*'))
-    state['files'] = []
     state['current_comparison'] = []
     state['loading'] = True
     
@@ -115,14 +114,14 @@ def load_images(images_path: str, config: str, state: dict, progress: gr.Progres
     
     state['loading'] = False
     outputs = generate_comparison(state)
-    return [f"Loaded {len(state['files'])} images from {images_path}", *outputs]
+    return [f"Loaded {len(state['files'])} total images", *outputs]
     
 def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
     state['current_comparison'] = []
     global embedding_cache
     embedding_cache = None
-    del state['score_embedding']
+    state['score_embedding'] = None
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()    
@@ -276,7 +275,7 @@ def on_ui_tabs():
                     images_path = gr.Textbox(label="Images path")
                     with gr.Row():
                         load_images_btn = gr.Button(value="Load")
-                        unload_btn = gr.Button(value="Unload")
+                        unload_btn = gr.Button(value="Clear All")
                     with gr.Row():
                         prompt_dropdown = gr.Dropdown(label="Rating prompt", value="default", choices=prompt_options, interactive=True)
                         create_refresh_button(prompt_dropdown, get_prompts, lambda: {"choices": prompt_options, "value": prompt_dropdown.value}, "prompt_dropdown_refresh")
