@@ -4,13 +4,47 @@ import torch.nn.functional as F
 import einops
 
 from torch import Tensor
+from abc import ABC, abstractmethod
 
-class LogisticRegression(nn.Module):
+class LogisticRegression(nn.Module, ABC):
+    @abstractmethod
+    def get_score(self, x: Tensor):
+        pass
+    
+    def forward(self, x: Tensor):
+        scores = self.get_score(x)
+        return torch.sigmoid(scores[:,0] - scores[:,1])
+
+class LinearLogisticRegression(LogisticRegression):
     def __init__(self, dim: int):
         super().__init__()
         
         self.dim = dim
         self.c = nn.Parameter(torch.zeros((dim)))
-    
-    def forward(self, x: Tensor):
-        return torch.sigmoid(x @ self.c.t())
+        
+    def get_score(self, x: Tensor):
+        return x @ self.c.t()
+        
+class MultifactorLogisticRegression(LogisticRegression):
+    def __init__(self, dim: int, factors: int):
+        super().__init__()
+        
+        self.dim = dim
+        self.factors = factors
+        self.input_conv = nn.Linear(dim, factors)
+        self.c = nn.Parameter(torch.zeros((factors)))
+        
+    def get_score(self, x: Tensor):
+        return torch.sigmoid(self.input_conv(x)) @ self.c.t()
+        
+class ControlPointLogisticRegression(LogisticRegression):
+    def __init__(self, dim: int, factors: int):
+        super().__init__()
+        
+        self.dim = dim
+        self.factors = factors
+        self.input_conv = nn.Linear(dim, factors, bias=False)
+        self.c = nn.Parameter(torch.zeros((factors)))
+        
+    def get_score(self, x: Tensor):
+        return F.softmax(self.input_conv(x), dim=-1) @ self.c.t()

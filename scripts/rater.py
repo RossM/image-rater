@@ -1,5 +1,6 @@
 import random
 import time
+import os
 import gc
 import json
 import gradio as gr
@@ -14,7 +15,7 @@ from PIL import Image
 from pathlib import Path
 
 from scripts.modules.embedding import EmbeddingCache
-from scripts.modules.logistic import LogisticRegression
+from scripts.modules.logistic import LinearLogisticRegression, MultifactorLogisticRegression, ControlPointLogisticRegression
 
 root_path = Path(__file__).parents[3]
 image_rater_path = root_path / 'image_rater'
@@ -48,10 +49,10 @@ def generate_comparison(state: dict):
         return None, None
         
     random.shuffle(filepaths)
-    score_embedding = state.get('score_embedding', None)
-    if state['opt_prefer_high_scoring'] and score_embedding != None:
+    score_model = state.get('score_model', None)
+    if state['opt_prefer_high_scoring'] and score_model != None:
         candidates = filepaths[0:5]
-        candidates.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
+        candidates.sort(reverse=True, key=lambda filename: score_model.get_score(embedding_cache.get_embedding(filename)))
         print(candidates)
         selected = candidates[0:2]
         random.shuffle(selected)
@@ -144,11 +145,11 @@ def test_logistic_regression(
         prompt_file: str,
         validation_split_pct: float,
         max_train_samples: int,
+        scoring_model: str,
         weight_decay: float,
         optimization_steps: int,
         trials: int,
         lr: float,
-        goodness_bias: float,
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
@@ -174,21 +175,18 @@ def test_logistic_regression(
     device = devices.get_device_for('image_rater')
     
     input_tensors = []
-    weight_tensors = []
     for log_entry in progress.tqdm(log_entries, desc="Building input", unit="examples"):
         if len(log_entry['files']) < 2:
             print(f"Invalid log entry: {log_entry}")
             continue
         choice = log_entry['choice']
         try:
-            embeddings = [embedding_cache.get_embedding(filename) for filename in log_entry['files']]
-            embedding_diff = embeddings[1 - choice] - embeddings[choice]
-            embedding_mean = (embeddings[0] + embeddings[1]) / 2
-            assert(embedding_diff.dtype == float or embedding_diff.dtype == torch.float32)
-            if embedding_diff.isinf().any():
+            embeddings = torch.stack([embedding_cache.get_embedding(filename) for filename in log_entry['files']])
+            assert(embeddings.dtype == float or embeddings.dtype == torch.float32)
+            if embeddings.isinf().any():
                 print(f"Infinite embedding, skipping: {log_entry}")
                 continue
-            input_tensors.append(torch.stack([embedding_diff, embedding_mean]))
+            input_tensors.append(embeddings[[1 - choice, choice]])
         except Exception as e:
             print(e)
     
@@ -199,6 +197,13 @@ def test_logistic_regression(
     
     lr_scheduler_type = "linear"
     
+    if "-" in scoring_model:
+        (model_type, factors) = scoring_model.split("-")
+        factors = int(factors)
+    else:
+        model_type = scoring_model
+        factors = 0
+    
     validation_losses = []
     score_embeddings = []
     for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
@@ -206,26 +211,30 @@ def test_logistic_regression(
         train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
         validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
         
-        model = LogisticRegression(dim=train_input.shape[2])
+        print(train_input.shape)
+        
+        if model_type == "Linear":
+            model = LinearLogisticRegression(dim=train_input.shape[2])
+        elif model_type == "Multifactor":
+            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors)
+        elif model_type == "ControlPoint":
+            model = ControlPointLogisticRegression(dim=train_input.shape[2], factors=factors)
+            
         model.to(device=device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
-        #optimizer = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay)
         if lr_scheduler_type == "linear":
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0 - epoch / optimization_steps)
         else:
             scheduler = None
         
         for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
-            pred = model(train_input[:,0,:])
+            pred = model(train_input)
             for i in range(0, pred.shape[0]):
                 if pred[i].isnan():
                     print(f"Suspicious input: {train_input[i]}")
                     return
-            # Goodness bias controls how much comparisons between high-scoring examples are
-            # weighted over other examples in computing loss. If set to 0, all examples count equally.
-            example_weights = F.softmax(goodness_bias * train_input[:,1,:] @ model.c.t()).detach()
-            train_loss = ((pred ** 2) * example_weights).sum()
+            train_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
             train_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -233,27 +242,25 @@ def test_logistic_regression(
                 scheduler.step()
         
             with torch.no_grad():
-                pred = model(validation_input[:,0,:])
+                pred = model(validation_input)
                 validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
  
         print(f"validation_loss={validation_loss}")
         validation_losses.append(validation_loss.item())
-        score_embeddings.append(model.c.data.clone().detach())
         
     scores = {}
     with torch.no_grad():
-        score_embedding = torch.stack(score_embeddings).mean(dim=0).cpu()
-        state['score_embedding'] = score_embedding
+        state['score_model'] = model.cpu()
         candidate_files = state['files'] if len(state['files']) > 0 else logged_files
-        topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache)
-        topfiles.sort(reverse=True, key=lambda filename: embedding_cache.get_embedding(filename).dot(score_embedding))
+        topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache and os.path.isfile(filename))
+        topfiles.sort(reverse=True, key=lambda filename: model.get_score(embedding_cache.get_embedding(filename)))
     
     if validation_samples > 0:
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps}," + 
-                        f"{trials},{validation_mean},{lr_scheduler_type},{optimizer.__class__},{goodness_bias}\n")
+                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},"
+                        f"{trials},{validation_mean},{lr_scheduler_type},{model_type},{factors}\n")
         except Exception as e:
             print(e)
     
@@ -316,11 +323,17 @@ def on_ui_tabs():
                         load_model_btn = gr.Button(value="Load CLIP", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
                     maximum_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
+                    scoring_model = gr.Dropdown(label="Scoring model", value="Linear", choices=[
+                        "Linear",
+                        "Multifactor-16",
+                        "Multifactor-256",
+                        "ControlPoint-16",
+                        "ControlPoint-256",
+                    ])
                     weight_decay = gr.Number(label="Weight decay", value=2)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.2)
-                    goodness_bias = gr.Number(label = "Goodness bias", value=0)
                 test_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
             with gr.Row():
@@ -389,11 +402,11 @@ def on_ui_tabs():
             prompt_dropdown,
             validation_split,
             maximum_train_samples,
+            scoring_model,
             weight_decay,
             optimization_steps,
             trials,
             lr,
-            goodness_bias,
             state,
         ], status_tracker=[status_area], outputs=[status_area, test_gallery])
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
