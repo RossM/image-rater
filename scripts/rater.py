@@ -6,6 +6,7 @@ import json
 import gradio as gr
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from modules import devices, script_callbacks, scripts, shared, call_queue
@@ -15,7 +16,7 @@ from PIL import Image
 from pathlib import Path
 
 from scripts.modules.embedding import EmbeddingCache
-from scripts.modules.logistic import LinearLogisticRegression, MultifactorLogisticRegression, ControlPointLogisticRegression
+from scripts.modules.logistic import LinearLogisticRegression, MultifactorLogisticRegression
 
 root_path = Path(__file__).parents[3]
 image_rater_path = root_path / 'image_rater'
@@ -211,14 +212,16 @@ def test_logistic_regression(
         train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
         validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
         
-        print(train_input.shape)
-        
         if model_type == "Linear":
             model = LinearLogisticRegression(dim=train_input.shape[2])
         elif model_type == "Multifactor":
             model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors)
+        elif model_type == "ReLU":
+            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.ReLU())
+        elif model_type == "SiLU":
+            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.SiLU())
         elif model_type == "ControlPoint":
-            model = ControlPointLogisticRegression(dim=train_input.shape[2], factors=factors)
+            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.Softmax(dim=-1))
             
         model.to(device=device)
 
@@ -329,6 +332,10 @@ def on_ui_tabs():
                         "Multifactor-256",
                         "ControlPoint-16",
                         "ControlPoint-256",
+                        "ReLU-16",
+                        "ReLU-256",
+                        "SiLU-16",
+                        "SiLU-256",
                     ])
                     weight_decay = gr.Number(label="Weight decay", value=2)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)

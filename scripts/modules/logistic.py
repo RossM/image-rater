@@ -26,25 +26,14 @@ class LinearLogisticRegression(LogisticRegression):
         return x @ self.c.t()
         
 class MultifactorLogisticRegression(LogisticRegression):
-    def __init__(self, dim: int, factors: int):
+    def __init__(self, dim: int, factors: int, activation = nn.Sigmoid()):
         super().__init__()
         
         self.dim = dim
         self.factors = factors
         self.input_conv = nn.Linear(dim, factors)
+        self.activation = activation
         self.c = nn.Parameter(torch.zeros((factors)))
         
     def get_score(self, x: Tensor):
-        return torch.sigmoid(self.input_conv(x)) @ self.c.t()
-        
-class ControlPointLogisticRegression(LogisticRegression):
-    def __init__(self, dim: int, factors: int):
-        super().__init__()
-        
-        self.dim = dim
-        self.factors = factors
-        self.input_conv = nn.Linear(dim, factors, bias=False)
-        self.c = nn.Parameter(torch.zeros((factors)))
-        
-    def get_score(self, x: Tensor):
-        return F.softmax(self.input_conv(x), dim=-1) @ self.c.t()
+        return self.activation(self.input_conv(x)) @ self.c.t()
