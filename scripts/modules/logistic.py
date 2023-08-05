@@ -33,7 +33,7 @@ class MultifactorLogisticRegression(LogisticRegression):
         self.factors = factors
         self.input_conv = nn.Linear(dim, factors)
         self.activation = activation
-        self.c = nn.Parameter(torch.zeros((factors)))
+        self.output_conv = nn.Linear(factors, 1, bias=False)
         
     def get_score(self, x: Tensor):
-        return self.activation(self.input_conv(x)) @ self.c.t()
+        return self.output_conv(self.activation(self.input_conv(x)))

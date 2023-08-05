@@ -18,6 +18,8 @@ from pathlib import Path
 from scripts.modules.embedding import EmbeddingCache
 from scripts.modules.logistic import LinearLogisticRegression, MultifactorLogisticRegression
 
+from dadaptation import DAdaptAdam
+
 root_path = Path(__file__).parents[3]
 image_rater_path = root_path / 'image_rater'
 log_path = image_rater_path / 'log'
@@ -149,8 +151,10 @@ def test_logistic_regression(
         scoring_model: str,
         weight_decay: float,
         optimization_steps: int,
+        batch_size: int,
         trials: int,
         lr: float,
+        lr_schedule: str,
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
@@ -191,12 +195,10 @@ def test_logistic_regression(
         except Exception as e:
             print(e)
     
-    validation_samples = validation_split_pct * len(input_tensors) // 100
-    train_samples = min(len(input_tensors) - validation_samples, max_train_samples)
+    num_validation_samples = validation_split_pct * len(input_tensors) // 100
+    num_train_samples = min(len(input_tensors) - num_validation_samples, max_train_samples)
     
-    print(f"train_samples={train_samples}, validation_samples={validation_samples}")
-    
-    lr_scheduler_type = "linear"
+    print(f"num_train_samples={num_train_samples}, num_validation_samples={num_validation_samples}")
     
     if "-" in scoring_model:
         (model_type, factors) = scoring_model.split("-")
@@ -209,29 +211,38 @@ def test_logistic_regression(
     score_embeddings = []
     for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
         random.shuffle(input_tensors)
-        train_input = torch.stack(input_tensors[0:train_samples]).to(device=device)
-        validation_input = torch.stack(input_tensors[train_samples:train_samples+validation_samples]).to(device=device)
+        train_samples = input_tensors[0:num_train_samples]
+        validation_samples = input_tensors[num_train_samples:num_train_samples+num_validation_samples]
+        validation_input = torch.stack(validation_samples).to(device=device)
+        embed_dim = embedding_cache.embed_length
         
         if model_type == "Linear":
-            model = LinearLogisticRegression(dim=train_input.shape[2])
+            model = LinearLogisticRegression(dim=embed_dim)
         elif model_type == "Multifactor":
-            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors)
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors)
         elif model_type == "ReLU":
-            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.ReLU())
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU())
         elif model_type == "SiLU":
-            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.SiLU())
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.SiLU())
         elif model_type == "ControlPoint":
-            model = MultifactorLogisticRegression(dim=train_input.shape[2], factors=factors, activation=nn.Softmax(dim=-1))
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Softmax(dim=-1))
             
         model.to(device=device)
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
-        if lr_scheduler_type == "linear":
+        if lr_schedule == "Linear":
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0 - epoch / optimization_steps)
-        else:
+        elif lr_schedule == "Constant":
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
+            scheduler = None
+        elif lr_schedule == "Dadaptation":
+            optimizer = DAdaptAdam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
             scheduler = None
         
         for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
+            random.shuffle(train_samples)
+            train_input = torch.stack(train_samples[0:batch_size]).to(device=device)
+
             pred = model(train_input)
             for i in range(0, pred.shape[0]):
                 if pred[i].isnan():
@@ -258,12 +269,12 @@ def test_logistic_regression(
         topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache and os.path.isfile(filename))
         topfiles.sort(reverse=True, key=lambda filename: model.get_score(embedding_cache.get_embedding(filename)))
     
-    if validation_samples > 0:
+    if num_validation_samples > 0:
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{train_samples},{validation_samples},{lr},{weight_decay},{optimization_steps},"
-                        f"{trials},{validation_mean},{lr_scheduler_type},{model_type},{factors}\n")
+                f.write(f"{embedding_cache.config},{num_train_samples},{num_validation_samples},{lr},{weight_decay},{optimization_steps},"
+                        f"{batch_size},{trials},{validation_mean},{lr_schedule},{model_type},{factors}\n")
         except Exception as e:
             print(e)
     
@@ -325,7 +336,7 @@ def on_ui_tabs():
                         ])
                         load_model_btn = gr.Button(value="Load CLIP", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
-                    maximum_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
+                    max_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
                     scoring_model = gr.Dropdown(label="Scoring model", value="Linear", choices=[
                         "Linear",
                         "Multifactor-16",
@@ -339,8 +350,14 @@ def on_ui_tabs():
                     ])
                     weight_decay = gr.Number(label="Weight decay", value=2)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
+                    batch_size = gr.Number(label="Batch size", value=1024, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
                     lr = gr.Number(label = "Learning rate", value=0.2)
+                    lr_schedule = gr.Radio(label="Learning rate scheduler", value="Linear", choices=[
+                        "Constant",
+                        "Linear",
+                        "Dadaptation",
+                    ])
                 test_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
             with gr.Row():
@@ -408,12 +425,14 @@ def on_ui_tabs():
             model_dropdown,
             prompt_dropdown,
             validation_split,
-            maximum_train_samples,
+            max_train_samples,
             scoring_model,
             weight_decay,
             optimization_steps,
+            batch_size,
             trials,
             lr,
+            lr_schedule,
             state,
         ], status_tracker=[status_area], outputs=[status_area, test_gallery])
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
