@@ -30,7 +30,7 @@ class LinearLogisticRegression(LogisticRegression):
         return x @ self.c.t()
         
     def aux_loss(self):
-        return self.c.pow(2).mean()
+        return self.c.pow(2).sum() / self.dim
         
 class MultifactorLogisticRegression(LogisticRegression):
     def __init__(self, dim: int, factors: int, activation = nn.Sigmoid(), normalize: bool = False):
@@ -47,13 +47,11 @@ class MultifactorLogisticRegression(LogisticRegression):
         x = self.input_conv(x)
         x = self.activation(x)
         if self.normalize:
-            x = x / x.norm()
+            x = x - x.mean(dim=-1, keepdim=True)
+            x = x / (x.norm(dim=-1, keepdim=True) + 1e-5)
         x = self.output_conv(x)
         return x
 
     def aux_loss(self):
-        if self.normalize:
-            return self.output_conv.weight.pow(2).mean()
-        else:
-            return self.input_conv.weight.pow(2).mean() + self.output_conv.weight.pow(2).mean()
+        return (self.input_conv.weight.pow(2).sum() + self.output_conv.weight.pow(2).sum()) / self.dim
 

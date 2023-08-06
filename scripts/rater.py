@@ -244,7 +244,7 @@ def test_logistic_regression(
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU(), normalize=True)
         elif model_type == "SiLU":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.SiLU())
-        elif model_type == "Softmax":
+        elif model_type == "SoftMax":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Softmax(dim=-1))
         elif model_type == "Identity":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Identity())
