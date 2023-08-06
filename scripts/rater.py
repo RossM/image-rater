@@ -33,6 +33,21 @@ cache_path.mkdir(parents=True, exist_ok=True)
 
 def safe_filename(s: str):
     return "".join(x if x.isalnum() or x == " " else "_" for x in s)
+    
+def get_status_text(state: dict):
+    filepaths = state['files']
+    model = state.get('score_model', None)
+    
+    if len(filepaths) > 0:
+        out = f"{len(filepaths)} files loaded."
+    else:
+        out = "No files loaded."
+    if embedding_cache:
+        out += f" OpenCLIP {embedding_cache.config} loaded."
+    if model:
+        out += " Scoring model available."
+    
+    return out
 
 def change_embedding_config(config: str, progress: gr.Progress = gr.Progress()):
     global embedding_cache
@@ -118,7 +133,7 @@ def load_images(images_path: str, config: str, state: dict, progress: gr.Progres
     
     state['loading'] = False
     outputs = generate_comparison(state)
-    return [f"Loaded {len(state['files'])} total images", *outputs]
+    return [get_status_text(state), *outputs]
     
 def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     state['files'] = []
@@ -129,7 +144,7 @@ def clear_images(state: dict, progress: gr.Progress = gr.Progress()):
     gc.collect()
     devices.torch_gc()
     torch.cuda.empty_cache()    
-    return ["No images loaded", None, None]
+    return [get_status_text(state), None, None]
     
 def calculate_embeddings(config: str, state: dict, progress: gr.Progress = gr.Progress()):
     if len(state['files']) == 0:
@@ -141,7 +156,7 @@ def calculate_embeddings(config: str, state: dict, progress: gr.Progress = gr.Pr
         embedding_cache = EmbeddingCache(cache_path, config=config)
     
     embedding_cache.precalc_embedding_batch(state['files'], progress)
-    return "Done"
+    return get_status_text(state)
     
 def test_logistic_regression(
         config: str,
@@ -278,7 +293,7 @@ def test_logistic_regression(
         except Exception as e:
             print(e)
     
-    return ["Done", topfiles[0:12]]
+    return [get_status_text(state), topfiles[0:12]]
     
 def on_ui_tabs():
     def get_prompts():
@@ -438,6 +453,8 @@ def on_ui_tabs():
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
         
         load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], status_tracker=[status_area], outputs=[status_area])
+    
+        status_area.value = get_status_text(state.value)
     
     return (ui_tab, "Image Rater", "imagerater"),
 
