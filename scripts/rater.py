@@ -3,6 +3,7 @@ import time
 import os
 import gc
 import json
+import math
 import gradio as gr
 
 import torch
@@ -164,7 +165,7 @@ def test_logistic_regression(
         validation_split_pct: float,
         max_train_samples: int,
         scoring_model: str,
-        weight_decay: float,
+        aux_loss: float,
         optimization_steps: int,
         batch_size: int,
         trials: int,
@@ -233,26 +234,37 @@ def test_logistic_regression(
         
         if model_type == "Linear":
             model = LinearLogisticRegression(dim=embed_dim)
-        elif model_type == "Multifactor":
-            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors)
+        elif model_type == "Sigmoid":
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Sigmoid())
+        elif model_type == "SigmoidNorm":
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Sigmoid(), normalize=True)
         elif model_type == "ReLU":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU())
+        elif model_type == "ReLUNorm":
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU(), normalize=True)
         elif model_type == "SiLU":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.SiLU())
-        elif model_type == "ControlPoint":
+        elif model_type == "Softmax":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Softmax(dim=-1))
+        elif model_type == "Identity":
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Identity())
+        elif model_type == "IdentityNorm":
+            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Identity(), normalize=True)
             
         model.to(device=device)
 
         if lr_schedule == "Linear":
-            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95))
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0 - epoch / optimization_steps)
         elif lr_schedule == "Constant":
-            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, betas=(0.9, 0.95))
             scheduler = None
         elif lr_schedule == "Dadaptation":
-            optimizer = DAdaptAdam(model.parameters(), lr=lr, weight_decay=weight_decay, betas=(0.9, 0.95))
+            optimizer = DAdaptAdam(model.parameters(), lr=lr, betas=(0.9, 0.95))
             scheduler = None
+            
+        best_validation_loss = math.inf
+        best_model = None
         
         for step in progress.tqdm(range(optimization_steps), desc="Optimizing", unit="steps"):
             random.shuffle(train_samples)
@@ -264,6 +276,7 @@ def test_logistic_regression(
                     print(f"Suspicious input: {train_input[i]}")
                     return
             train_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+            train_loss += aux_loss * model.aux_loss()
             train_loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -277,9 +290,13 @@ def test_logistic_regression(
         print(f"validation_loss={validation_loss}")
         validation_losses.append(validation_loss.item())
         
+        if validation_loss < best_validation_loss:
+            best_validation_loss = validation_loss
+            best_model = model.cpu()
+        
     scores = {}
     with torch.no_grad():
-        state['score_model'] = model.cpu()
+        state['score_model'] = best_model
         candidate_files = state['files'] if len(state['files']) > 0 else logged_files
         topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache and os.path.isfile(filename))
         topfiles.sort(reverse=True, key=lambda filename: model.get_score(embedding_cache.get_embedding(filename)))
@@ -288,7 +305,7 @@ def test_logistic_regression(
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{num_train_samples},{num_validation_samples},{lr},{weight_decay},{optimization_steps},"
+                f.write(f"{embedding_cache.config},{num_train_samples},{num_validation_samples},{lr},{aux_loss},{optimization_steps},"
                         f"{batch_size},{trials},{validation_mean},{lr_schedule},{model_type},{factors}\n")
         except Exception as e:
             print(e)
@@ -354,16 +371,27 @@ def on_ui_tabs():
                     max_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
                     scoring_model = gr.Dropdown(label="Scoring model", value="Linear", choices=[
                         "Linear",
-                        "Multifactor-16",
-                        "Multifactor-256",
-                        "ControlPoint-16",
-                        "ControlPoint-256",
+                        "Identity-1",
+                        "Identity-16",
+                        "Identity-256",
+                        "IdentityNorm-16",
+                        "IdentityNorm-256",
                         "ReLU-16",
                         "ReLU-256",
+                        "ReLUNorm-16",
+                        "ReLUNorm-256",
+                        "Sigmoid-1",
+                        "Sigmoid-16",
+                        "Sigmoid-256",
+                        "SigmoidNorm-16",
+                        "SigmoidNorm-256",
                         "SiLU-16",
                         "SiLU-256",
+                        "SoftMax-16",
+                        "SoftMax-256",
+                        "SoftMax-1024",
                     ])
-                    weight_decay = gr.Number(label="Weight decay", value=2)
+                    aux_loss = gr.Number(label="Aux loss", value=2)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
                     batch_size = gr.Number(label="Batch size", value=1024, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
@@ -442,7 +470,7 @@ def on_ui_tabs():
             validation_split,
             max_train_samples,
             scoring_model,
-            weight_decay,
+            aux_loss,
             optimization_steps,
             batch_size,
             trials,

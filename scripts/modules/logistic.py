@@ -14,6 +14,10 @@ class LogisticRegression(nn.Module, ABC):
     def forward(self, x: Tensor):
         scores = self.get_score(x)
         return torch.sigmoid(scores[:,0] - scores[:,1])
+        
+    @abstractmethod
+    def aux_loss(self):
+        pass
 
 class LinearLogisticRegression(LogisticRegression):
     def __init__(self, dim: int):
@@ -25,8 +29,11 @@ class LinearLogisticRegression(LogisticRegression):
     def get_score(self, x: Tensor):
         return x @ self.c.t()
         
+    def aux_loss(self):
+        return self.c.pow(2).mean()
+        
 class MultifactorLogisticRegression(LogisticRegression):
-    def __init__(self, dim: int, factors: int, activation = nn.Sigmoid()):
+    def __init__(self, dim: int, factors: int, activation = nn.Sigmoid(), normalize: bool = False):
         super().__init__()
         
         self.dim = dim
@@ -34,6 +41,19 @@ class MultifactorLogisticRegression(LogisticRegression):
         self.input_conv = nn.Linear(dim, factors)
         self.activation = activation
         self.output_conv = nn.Linear(factors, 1, bias=False)
+        self.normalize = normalize
         
     def get_score(self, x: Tensor):
-        return self.output_conv(self.activation(self.input_conv(x)))
+        x = self.input_conv(x)
+        x = self.activation(x)
+        if self.normalize:
+            x = x / x.norm()
+        x = self.output_conv(x)
+        return x
+
+    def aux_loss(self):
+        if self.normalize:
+            return self.output_conv.weight.pow(2).mean()
+        else:
+            return self.input_conv.weight.pow(2).mean() + self.output_conv.weight.pow(2).mean()
+
