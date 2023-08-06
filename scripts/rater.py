@@ -174,6 +174,10 @@ def test_logistic_regression(
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
+    
+    rand_seed = 12345
+    random.seed(rand_seed)
+    torch.manual_seed(rand_seed)
 
     global embedding_cache
     if not embedding_cache or embedding_cache.config != config:
@@ -224,6 +228,7 @@ def test_logistic_regression(
         factors = 0
     
     validation_losses = []
+    binary_validation_losses = []
     score_embeddings = []
     for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
         random.shuffle(input_tensors)
@@ -285,10 +290,13 @@ def test_logistic_regression(
         
             with torch.no_grad():
                 pred = model(validation_input)
+                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
                 validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
  
-        print(f"validation_loss={validation_loss}")
+        print(f"validation_loss={validation_loss}, binary_validation_loss={binary_validation_loss}")
         validation_losses.append(validation_loss.item())
+        binary_validation_losses.append(binary_validation_loss.item())
         
         if validation_loss < best_validation_loss:
             best_validation_loss = validation_loss
@@ -304,12 +312,13 @@ def test_logistic_regression(
     if num_validation_samples > 0:
         try:
             validation_mean = torch.Tensor(validation_losses).mean()
+            binary_validation_mean = torch.Tensor(binary_validation_losses).mean()
             with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{num_train_samples},{num_validation_samples},{lr},{aux_loss},{optimization_steps},"
-                        f"{batch_size},{trials},{validation_mean},{lr_schedule},{model_type},{factors}\n")
+                f.write(f"{embedding_cache.config},{model_type},{factors},{num_train_samples},{num_validation_samples},{aux_loss},"
+                        f"{lr},{lr_schedule},{optimization_steps},{batch_size},{trials},{rand_seed},{validation_mean},{binary_validation_mean}\n")
         except Exception as e:
             print(e)
-    
+            
     return [get_status_text(state), topfiles[0:12]]
     
 def on_ui_tabs():
