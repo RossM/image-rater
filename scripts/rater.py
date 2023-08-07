@@ -288,11 +288,11 @@ def test_logistic_regression(
             if scheduler:
                 scheduler.step()
         
-            with torch.no_grad():
-                pred = model(validation_input)
-                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
-                validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
-                binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
+        with torch.no_grad():
+            pred = model(validation_input)
+            binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
+            validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+            binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
  
         print(f"validation_loss={validation_loss}, binary_validation_loss={binary_validation_loss}")
         validation_losses.append(validation_loss.item())
