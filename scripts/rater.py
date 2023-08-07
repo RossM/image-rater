@@ -238,8 +238,9 @@ def test_logistic_regression(
     for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
         random.shuffle(input_tensors)
         train_samples = input_tensors[0:num_train_samples]
-        validation_samples = input_tensors[num_train_samples:num_train_samples+num_validation_samples]
-        validation_input = torch.stack(validation_samples).to(device=device)
+        if num_validation_samples > 0:
+            validation_samples = input_tensors[num_train_samples:num_train_samples+num_validation_samples]
+            validation_input = torch.stack(validation_samples).to(device=device)
         embed_dim = embedding_cache.embed_length
         
         if model_type == "Sigmoid":
@@ -283,19 +284,23 @@ def test_logistic_regression(
             if scheduler:
                 scheduler.step()
         
-        with torch.no_grad():
-            pred = model(validation_input)
-            binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
-            validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
-            binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
- 
-        print(f"validation_loss={validation_loss}, binary_validation_loss={binary_validation_loss}")
-        validation_losses.append(validation_loss.item())
-        binary_validation_losses.append(binary_validation_loss.item())
+        if num_validation_samples > 0:
+            with torch.no_grad():
+                pred = model(validation_input)
+                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
+                validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
+     
+            print(f"validation_loss={validation_loss}, binary_validation_loss={binary_validation_loss}")
+            validation_losses.append(validation_loss.item())
+            binary_validation_losses.append(binary_validation_loss.item())
         
-        if validation_loss < best_validation_loss:
-            best_validation_loss = validation_loss
-            best_model = model.cpu()
+            if validation_loss < best_validation_loss:
+                best_validation_loss = validation_loss
+                best_model = model.cpu()
+    
+    if num_validation_samples == 0:
+        best_model = model.cpu()
         
     scores = {}
     with torch.no_grad():
