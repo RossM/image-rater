@@ -17,7 +17,7 @@ from PIL import Image
 from pathlib import Path
 
 from scripts.modules.embedding import EmbeddingCache
-from scripts.modules.logistic import LinearLogisticRegression, MultifactorLogisticRegression
+from scripts.modules.logistic import MultifactorLogisticRegression
 
 from dadaptation import DAdaptAdam
 
@@ -237,24 +237,14 @@ def test_logistic_regression(
         validation_input = torch.stack(validation_samples).to(device=device)
         embed_dim = embedding_cache.embed_length
         
-        if model_type == "Linear":
-            model = LinearLogisticRegression(dim=embed_dim)
-        elif model_type == "Sigmoid":
+        if model_type == "Sigmoid":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Sigmoid())
-        elif model_type == "SigmoidNorm":
-            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Sigmoid(), normalize=True)
         elif model_type == "ReLU":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU())
-        elif model_type == "ReLUNorm":
-            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.ReLU(), normalize=True)
         elif model_type == "SiLU":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.SiLU())
-        elif model_type == "SoftMax":
-            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Softmax(dim=-1))
         elif model_type == "Identity":
             model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Identity())
-        elif model_type == "IdentityNorm":
-            model = MultifactorLogisticRegression(dim=embed_dim, factors=factors, activation=nn.Identity(), normalize=True)
             
         model.to(device=device)
 
@@ -379,26 +369,16 @@ def on_ui_tabs():
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
                     max_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
                     scoring_model = gr.Dropdown(label="Scoring model", value="Linear", choices=[
-                        "Linear",
                         "Identity-1",
                         "Identity-16",
                         "Identity-256",
-                        "IdentityNorm-16",
-                        "IdentityNorm-256",
                         "ReLU-16",
                         "ReLU-256",
-                        "ReLUNorm-16",
-                        "ReLUNorm-256",
                         "Sigmoid-1",
                         "Sigmoid-16",
                         "Sigmoid-256",
-                        "SigmoidNorm-16",
-                        "SigmoidNorm-256",
                         "SiLU-16",
                         "SiLU-256",
-                        "SoftMax-16",
-                        "SoftMax-256",
-                        "SoftMax-1024",
                     ])
                     aux_loss = gr.Number(label="Aux loss", value=2)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
