@@ -287,8 +287,13 @@ def test_logistic_regression(
         if num_validation_samples > 0:
             with torch.no_grad():
                 pred = model(validation_input)
-                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
                 validation_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                
+                # Note that the correct prediction is always 0, so using >= here means
+                # that ties are scored as incorrect. This is important because scoring
+                # models tend to collapse and return the same score for most images if 
+                # regularization loss is too high.
+                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
                 binary_validation_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
      
             print(f"validation_loss={validation_loss}, binary_validation_loss={binary_validation_loss}")
