@@ -216,7 +216,9 @@ def test_logistic_regression(
             print(e)
     
     num_validation_samples = validation_split_pct * len(input_tensors) // 100
-    num_train_samples = min(len(input_tensors) - num_validation_samples, max_train_samples)
+    num_train_samples = len(input_tensors) - num_validation_samples
+    if max_train_samples > 0:
+        num_train_samples = min(num_train_samples, max_train_samples)
     
     print(f"num_train_samples={num_train_samples}, num_validation_samples={num_validation_samples}")
     
@@ -226,6 +228,9 @@ def test_logistic_regression(
     else:
         model_type = scoring_model
         factors = 0
+        
+    # Empirical correction based on number of samples
+    aux_loss /= num_train_samples ** 0.5
     
     validation_losses = []
     binary_validation_losses = []
@@ -367,7 +372,7 @@ def on_ui_tabs():
                         ])
                         load_model_btn = gr.Button(value="Load CLIP", scale=1)
                     validation_split = gr.Slider(label="Validation split %", value=20, minimum=0, maximum=95, step=5)
-                    max_train_samples = gr.Number(label="Maximum train samples", value=10000, precision=0)
+                    max_train_samples = gr.Number(label="Maximum train samples", value=0, precision=0)
                     scoring_model = gr.Dropdown(label="Scoring model", value="Linear", choices=[
                         "Identity-1",
                         "Identity-16",
@@ -380,12 +385,12 @@ def on_ui_tabs():
                         "SiLU-16",
                         "SiLU-256",
                     ])
-                    aux_loss = gr.Number(label="Aux loss", value=2)
+                    aux_loss = gr.Number(label="Regularization loss scale", value=0.05)
                     optimization_steps = gr.Number(label="Optimization steps", value=200, precision=0)
                     batch_size = gr.Number(label="Batch size", value=1024, precision=0)
                     trials = gr.Slider(label="Trials", value=1, minimum=1, maximum=10, step=1)
-                    lr = gr.Number(label = "Learning rate", value=0.2)
-                    lr_schedule = gr.Radio(label="Learning rate scheduler", value="Linear", choices=[
+                    lr = gr.Number(label = "Learning rate", value=1)
+                    lr_schedule = gr.Radio(label="Learning rate scheduler", value="Dadaptation", choices=[
                         "Constant",
                         "Linear",
                         "Dadaptation",
