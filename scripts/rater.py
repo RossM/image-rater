@@ -162,7 +162,9 @@ def calculate_embeddings(config: str, state: dict, progress: gr.Progress = gr.Pr
 def test_logistic_regression(
         config: str,
         prompt_file: str,
+        test_prompt_file: str,
         validation_split_pct: float,
+        run_test_split: bool,
         max_train_samples: int,
         scoring_model: str,
         aux_loss: float,
@@ -193,11 +195,10 @@ def test_logistic_regression(
             except Exception as e:
                 print(e)
     
-    logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
-    
-    embedding_cache.precalc_embedding_batch(logged_files, progress)
-    
     device = devices.get_device_for('image_rater')
+    
+    logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
+    embedding_cache.precalc_embedding_batch(logged_files, progress)
     
     input_tensors = []
     for log_entry in progress.tqdm(log_entries, desc="Building input", unit="examples"):
@@ -214,7 +215,39 @@ def test_logistic_regression(
             input_tensors.append(embeddings[[1 - choice, choice]])
         except Exception as e:
             print(e)
+            
+    if run_test_split:
+        log_entries = []
+        test_tensors = []
+
+        with open(log_path / (safe_filename(test_prompt_file) + '.json'), 'r') as f:
+            for line in progress.tqdm(f, desc="Reading test log", unit="lines"):
+                try:
+                    log_entry = json.loads(line)
+                    log_entries.append(log_entry)
+                except Exception as e:
+                    print(e)
+ 
+        logged_files = set(filename for log_entry in log_entries for filename in log_entry['files'])
+        embedding_cache.precalc_embedding_batch(logged_files, progress)
     
+        for log_entry in progress.tqdm(log_entries, desc="Building test input", unit="examples"):
+            if len(log_entry['files']) < 2:
+                print(f"Invalid log entry: {log_entry}")
+                continue
+            choice = log_entry['choice']
+            try:
+                embeddings = torch.stack([embedding_cache.get_embedding(filename) for filename in log_entry['files']])
+                assert(embeddings.dtype == float or embeddings.dtype == torch.float32)
+                if embeddings.isinf().any():
+                    print(f"Infinite embedding, skipping: {log_entry}")
+                    continue
+                test_tensors.append(embeddings[[1 - choice, choice]])
+            except Exception as e:
+                print(e)
+
+        test_input = torch.stack(test_tensors).to(device=device)
+  
     num_validation_samples = validation_split_pct * len(input_tensors) // 100
     num_train_samples = len(input_tensors) - num_validation_samples
     if max_train_samples > 0:
@@ -234,7 +267,8 @@ def test_logistic_regression(
     
     validation_losses = []
     binary_validation_losses = []
-    score_embeddings = []
+    test_losses = []
+    binary_test_losses = []
     for trial in progress.tqdm(range(trials), desc="Running", unit="trials"):
         random.shuffle(input_tensors)
         train_samples = input_tensors[0:num_train_samples]
@@ -303,6 +337,22 @@ def test_logistic_regression(
             if validation_loss < best_validation_loss:
                 best_validation_loss = validation_loss
                 best_model = model.cpu()
+        
+        if run_test_split:
+            with torch.no_grad():
+                pred = model(test_input)
+                test_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                
+                # Note that the correct prediction is always 0, so using >= here means
+                # that ties are scored as incorrect. This is important because scoring
+                # models tend to collapse and return the same score for most images if 
+                # regularization loss is too high.
+                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
+                binary_test_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
+
+            print(f"test_loss={test_loss}, binary_test_loss={binary_test_loss}")
+            test_losses.append(test_loss.item())
+            binary_test_losses.append(binary_test_loss.item())
     
     if num_validation_samples == 0:
         best_model = model.cpu()
@@ -314,15 +364,17 @@ def test_logistic_regression(
         topfiles = list(filename for filename in candidate_files if filename in embedding_cache.cache and os.path.isfile(filename))
         topfiles.sort(reverse=True, key=lambda filename: model.get_score(embedding_cache.get_embedding(filename)))
     
-    if num_validation_samples > 0:
-        try:
-            validation_mean = torch.Tensor(validation_losses).mean()
-            binary_validation_mean = torch.Tensor(binary_validation_losses).mean()
-            with open(image_rater_path / 'regression_trials.csv', 'a') as f:
-                f.write(f"{embedding_cache.config},{model_type},{factors},{num_train_samples},{num_validation_samples},{aux_loss},"
-                        f"{lr},{lr_schedule},{optimization_steps},{batch_size},{trials},{rand_seed},{validation_mean},{binary_validation_mean}\n")
-        except Exception as e:
-            print(e)
+    try:
+        validation_mean = torch.Tensor(validation_losses).mean() if len(validation_losses) > 0 else math.nan
+        binary_validation_mean = torch.Tensor(binary_validation_losses).mean() if len(binary_validation_losses) > 0 else math.nan
+        test_mean = torch.Tensor(test_losses).mean() if len(test_losses) > 0 else math.nan
+        binary_test_mean = torch.Tensor(binary_test_losses).mean() if len(binary_test_losses) > 0 else math.nan
+        with open(image_rater_path / 'regression_trials.csv', 'a') as f:
+            f.write(f"{embedding_cache.config},{model_type},{factors},{num_train_samples},{num_validation_samples},{aux_loss},"
+                    f"{lr},{lr_schedule},{optimization_steps},{batch_size},{trials},{rand_seed},"
+                    f"{validation_mean},{binary_validation_mean},{test_mean},{binary_test_mean}\n")
+    except Exception as e:
+        print(e)
             
     return [get_status_text(state), topfiles[0:12]]
     
@@ -405,6 +457,10 @@ def on_ui_tabs():
                         "Linear",
                         "Dadaptation",
                     ])
+                    with gr.Row():
+                        run_test_split = gr.Checkbox(label="Calculate test split scores")
+                        test_prompt_dropdown = gr.Dropdown(label="Test split prompt", value="default", choices=prompt_options, interactive=True)
+                        create_refresh_button(test_prompt_dropdown, get_prompts, lambda: {"choices": prompt_options, "value": test_prompt_dropdown.value}, "test_prompt_dropdown_refresh")
                 test_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         with gr.Tab(label="Preprocess"):
             with gr.Row():
@@ -471,7 +527,9 @@ def on_ui_tabs():
         test_train_event = test_train_btn.click(test_logistic_regression, inputs=[
             model_dropdown,
             prompt_dropdown,
+            test_prompt_dropdown,
             validation_split,
+            run_test_split,
             max_train_samples,
             scoring_model,
             aux_loss,
