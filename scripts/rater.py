@@ -318,6 +318,22 @@ def test_logistic_regression(
             if scheduler:
                 scheduler.step()
         
+        if run_test_split:
+            with torch.no_grad():
+                pred = model(test_input)
+                test_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
+                
+                # Note that the correct prediction is always 0, so using >= here means
+                # that ties are scored as incorrect. This is important because scoring
+                # models tend to collapse and return the same score for most images if 
+                # regularization loss is too high.
+                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
+                binary_test_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
+
+            print(f"test_loss={test_loss}, binary_test_loss={binary_test_loss}")
+            test_losses.append(test_loss.item())
+            binary_test_losses.append(binary_test_loss.item())
+        
         if num_validation_samples > 0:
             with torch.no_grad():
                 pred = model(validation_input)
@@ -337,22 +353,6 @@ def test_logistic_regression(
             if validation_loss < best_validation_loss:
                 best_validation_loss = validation_loss
                 best_model = model.cpu()
-        
-        if run_test_split:
-            with torch.no_grad():
-                pred = model(test_input)
-                test_loss = F.mse_loss(pred, torch.zeros_like(pred), reduction="mean")
-                
-                # Note that the correct prediction is always 0, so using >= here means
-                # that ties are scored as incorrect. This is important because scoring
-                # models tend to collapse and return the same score for most images if 
-                # regularization loss is too high.
-                binary_pred = (pred >= 0.5).to(dtype=pred.dtype)
-                binary_test_loss = F.mse_loss(binary_pred, torch.zeros_like(binary_pred), reduction="mean")
-
-            print(f"test_loss={test_loss}, binary_test_loss={binary_test_loss}")
-            test_losses.append(test_loss.item())
-            binary_test_losses.append(binary_test_loss.item())
     
     if num_validation_samples == 0:
         best_model = model.cpu()
