@@ -1,6 +1,7 @@
 import random
 import time
 import os
+import shutil
 import gc
 import json
 import math
@@ -378,6 +379,60 @@ def test_logistic_regression(
             
     return [get_status_text(state), topfiles[0:12]]
     
+@torch.no_grad()
+def copy_files(
+        source_dir: str,
+        dest_dir: str,
+        max_outputs: int,
+        state: dict,
+        progress: gr.Progress = gr.Progress(),
+    ):
+    
+    model = state['score_model']
+    
+    if source_dir == dest_dir:
+        return f"Source directory and destination directory are the same, choose different directories"
+    
+    global embedding_cache
+    
+    source_path = Path(source_dir)
+    dest_path = Path(dest_dir)
+    
+    filepaths = list(file for file in source_path.glob('*') if file.suffix != '.txt')
+    if len(filepaths) == 0:
+        return f"No files found at {source_dir}, check that you have the correct directory"
+    
+    embedding_cache.precalc_embedding_batch(filepaths, progress)
+    
+    dest_path.mkdir(parents=True, exist_ok=True)
+
+    file_scores = {}
+    for file in filepaths:
+        try:
+            embedding = embedding_cache.get_embedding(file)
+            score = model.get_score(embedding).item()
+            file_scores[file] = score
+        except Exception as e:
+            print(e)
+
+    output_count = 0
+    for file, score in sorted(file_scores.items(), key=lambda fs: fs[1], reverse=True):
+        print(f"{file} {score}")
+        dest_file = dest_path / file.name
+        print(f"LINK {file} {dest_file}")
+        os.link(file, dest_file)
+        file_txt = file.parent / (file.stem + ".txt")
+        if file_txt.is_file():
+            dest_file_txt = dest_path / file_txt.name
+            print(f"COPY {file_txt} {dest_file_txt}")
+            shutil.copy2(file_txt, dest_file_txt)
+        output_count += 1
+        if output_count >= max_outputs:
+            break
+            
+    return get_status_text(state)
+    
+    
 def on_ui_tabs():
     def get_prompts():
         global prompt_options
@@ -501,7 +556,7 @@ def on_ui_tabs():
                         preprocess_caption_wd14 = gr.Checkbox(label="Caption using Waifu Diffusion 1.4 tagger")
                         preprocess_use_hardlink = gr.Checkbox(label="Use hardlinks where possible")
                 with gr.Column():
-                    gr.Button(value="Preprocess images")
+                    preprocess_images_btn = gr.Button(value="Preprocess images")
                     gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         
         def prompt_dropdown_change(prompt):
@@ -543,6 +598,13 @@ def on_ui_tabs():
         #cancel_btn.click(lambda: "Cancelled", cancels=[calc_embeddings_event, test_train_event], outputs=[status_area])
         
         load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], status_tracker=[status_area], outputs=[status_area])
+    
+        preprocess_images_btn.click(copy_files, inputs=[
+            preprocess_input_path, 
+            preprocess_output_path, 
+            preprocess_maximum, 
+            state,
+        ], outputs=[status_area])
     
         status_area.value = get_status_text(state.value)
     

@@ -77,7 +77,7 @@ class EmbeddingCache:
         try:
             with open(self.cache_file, 'a') as f:
                 f.write(json.dumps({
-                    "key": filename,
+                    "key": str(filename),
                     "value": self.encode(embedding)
                 }) + "\n")
         except Exception as e:
