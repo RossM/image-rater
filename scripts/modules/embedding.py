@@ -71,13 +71,14 @@ class EmbeddingCache:
         return value
 
     def save_to_cache(self, filename, embedding):
+        filename = str(filename)
         embedding = embedding.float()
         assert(embedding.dtype == torch.float32)
         self.cache[filename] = embedding
         try:
             with open(self.cache_file, 'a') as f:
                 f.write(json.dumps({
-                    "key": str(filename),
+                    "key": filename,
                     "value": self.encode(embedding)
                 }) + "\n")
         except Exception as e:
