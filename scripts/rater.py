@@ -419,13 +419,16 @@ def copy_files(
     for file, score in sorted(file_scores.items(), key=lambda fs: fs[1], reverse=True):
         print(f"{file} {score}")
         dest_file = dest_path / file.name
-        print(f"LINK {file} {dest_file}")
-        os.link(file, dest_file)
-        file_txt = file.parent / (file.stem + ".txt")
-        if file_txt.is_file():
-            dest_file_txt = dest_path / file_txt.name
-            print(f"COPY {file_txt} {dest_file_txt}")
-            shutil.copy2(file_txt, dest_file_txt)
+        if dest_file.is_file():
+            print(f"EXISTS {file} {dest_file}")
+        else:
+            print(f"LINK {file} {dest_file}")
+            os.link(file, dest_file)
+            file_txt = file.parent / (file.stem + ".txt")
+            if file_txt.is_file():
+                dest_file_txt = dest_path / file_txt.name
+                print(f"COPY {file_txt} {dest_file_txt}")
+                shutil.copy2(file_txt, dest_file_txt)
         output_count += 1
         if output_count >= max_outputs:
             break
