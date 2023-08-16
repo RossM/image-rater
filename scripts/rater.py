@@ -406,19 +406,40 @@ def copy_files(
     
     dest_path.mkdir(parents=True, exist_ok=True)
 
-    file_scores = {}
+    items = []
     for file in filepaths:
         try:
             embedding = embedding_cache.get_embedding(file)
             score = model.get_score(embedding).item()
-            file_scores[file] = score
+            items.append(dict(
+                file = file,
+                embedding = embedding,
+                score = score,
+            ))
         except Exception as e:
             print(e)
 
+    selected_embeddings = torch.empty(0, embedding_cache.embed_length)
+
     output_count = 0
-    for file, score in sorted(file_scores.items(), key=lambda fs: fs[1], reverse=True):
-        print(f"{file} {score}")
+    for item in sorted(items, key=lambda fs: fs["score"], reverse=True):
+        file = item["file"]
+        embedding = item["embedding"]
+        score = item["score"]
+        if selected_embeddings.shape[0] > 0:
+            closest_dist = (embedding - selected_embeddings).norm(dim=1).min()
+        else:
+            closest_dist = 2
+
+        #print(f"{file} {score} {closest_dist}")
         dest_file = dest_path / file.name
+            
+        # Arbitrary threshold
+        if closest_dist < 0.2:
+            print(f"DUPLICATE {file}")
+            continue
+        
+        selected_embeddings = torch.cat((selected_embeddings, embedding[None,:]))
         if dest_file.is_file():
             print(f"EXISTS {file} {dest_file}")
         else:
