@@ -383,7 +383,7 @@ def test_logistic_regression(
 def select_files(
         source_dir: str,
         max_outputs: int,
-        encourage_diversity: bool,
+        diversity_weight: float,
         euclidean: bool,
         state: dict,
         progress: gr.Progress = gr.Progress(),
@@ -418,38 +418,26 @@ def select_files(
     embeddings = torch.stack([item["embedding"] for item in items])
     scores = model.get_score(embeddings).squeeze(dim=1)
     selected = torch.full([len(items)], False)
-    
-    if encourage_diversity:
-        distance_scores = torch.full([len(items)], -1)
+    distances = torch.full([len(items)], 2, dtype=torch.float32)
         
     if euclidean:
-        distance_metric = lambda x, y: 1 - (x - y).norm(dim=1)
-        same_threshold = 0.8
+        distance_metric = lambda x, y: (x - y).norm(dim=1)
+        duplicate_threshold = 0.2
     else:
-        distance_metric = lambda x, y: x @ y
-        same_threshold = 0.98
+        distance_metric = lambda x, y: 1 - x @ y
+        duplicate_threshold = 0.02
     
     output_count = 0
     while output_count < max_outputs:
-        if encourage_diversity:
-            adjusted_scores = scores - distance_scores + torch.where(selected, -math.inf, 0)
-        else:
-            adjusted_scores = scores + torch.where(selected, -math.inf, 0)
+        adjusted_scores = torch.lerp(scores, distances, diversity_weight) + torch.where(selected, -math.inf, 0)
         index = torch.argmax(adjusted_scores)
         file = items[index]["file"]
 
-        if encourage_diversity:
-            distance = distance_scores[index]
-            distance_scores = torch.max(distance_scores, distance_metric(embeddings, embeddings[index]))
-        else:
-            selected_embeddings = embeddings[selected]
-            if selected_embeddings.numel() > 0:
-                distance = distance_metric(selected_embeddings, embeddings[index]).min()
-            else:
-                distance = -1
+        distance = distances[index]
+        distances = torch.min(distances, distance_metric(embeddings, embeddings[index]))
         
         selected[index] = True
-        if distance > same_threshold:
+        if distance < duplicate_threshold:
             print(f"DUPLICATE {file}")
         else:
             yield file
@@ -462,7 +450,7 @@ def copy_files(
         source_dir: str,
         dest_dir: str,
         max_outputs: int,
-        encourage_diversity: bool,
+        diversity_weight: float,
         euclidean: bool,
         state: dict,
         progress: gr.Progress = gr.Progress(),
@@ -480,7 +468,7 @@ def copy_files(
     
     dest_path.mkdir(parents=True, exist_ok=True)
 
-    for file in select_files(source_dir, max_outputs, encourage_diversity, euclidean, state, progress):
+    for file in select_files(source_dir, max_outputs, diversity_weight, euclidean, state, progress):
         dest_file = dest_path / file.name
         
         if dest_file.is_file():
@@ -500,13 +488,13 @@ def preview_files(
         source_dir: str,
         dest_dir: str,
         max_outputs: int,
-        encourage_diversity: bool,
+        diversity_weight: float,
         euclidean: bool,
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
     
-    files = [str(file) for file in select_files(source_dir, max_outputs, encourage_diversity, euclidean, state, progress)]
+    files = [str(file) for file in select_files(source_dir, max_outputs, diversity_weight, euclidean, state, progress)]
     rand = random.Random(12345)
     rand.shuffle(files)
     files = files[0:20]
@@ -629,9 +617,9 @@ def on_ui_tabs():
                         with gr.Column(scale=1, min_width=160):
                             preprocess_filter_prompt_exclude_mode = gr.Radio(label="Match type", value="Any", choices=["Any", "All"], interactive=True)
                     preprocess_filter_confidence = gr.Slider(label="Filter confidence threshold", value=0.5, minimum=0, maximum=1, step=0.01)
+                    preprocess_diversity_weight = gr.Slider(label="Diversity weight", value=0.5, minimum=0, maximum=1, step=0.01)
                     preprocess_caption_txt = gr.Radio(label="Existing caption txt", value="Copy", choices=["Ignore", "Copy", "Append", "Prepend"], interactive=True)
                     with gr.Row():
-                        preprocess_encourage_diversity = gr.Checkbox(label="Encourage diversity")
                         preprocess_caption_blip2 = gr.Checkbox(label="Caption using BLIP2")
                         preprocess_caption_wd14 = gr.Checkbox(label="Caption using Waifu Diffusion 1.4 tagger")
                         preprocess_use_hardlink = gr.Checkbox(label="Use hardlinks where possible")
@@ -686,7 +674,7 @@ def on_ui_tabs():
             preprocess_input_path, 
             preprocess_output_path, 
             preprocess_maximum, 
-            preprocess_encourage_diversity,
+            preprocess_diversity_weight,
             preprocess_euclidean,
             state,
         ]
