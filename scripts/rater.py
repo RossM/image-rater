@@ -380,23 +380,19 @@ def test_logistic_regression(
     return [get_status_text(state), topfiles[0:12]]
     
 @torch.no_grad()
-def copy_files(
+def select_files(
         source_dir: str,
-        dest_dir: str,
         max_outputs: int,
+        encourage_diversity: bool,
         state: dict,
         progress: gr.Progress = gr.Progress(),
     ):
-    
+
     model = state['score_model']
-    
-    if source_dir == dest_dir:
-        return f"Source directory and destination directory are the same, choose different directories"
     
     global embedding_cache
     
     source_path = Path(source_dir)
-    dest_path = Path(dest_dir)
     
     filepaths = list(file for file in source_path.glob('*') if file.suffix != '.txt')
     if len(filepaths) == 0:
@@ -404,8 +400,6 @@ def copy_files(
     
     embedding_cache.precalc_embedding_batch(filepaths, progress)
     
-    dest_path.mkdir(parents=True, exist_ok=True)
-
     items = []
     for file in filepaths:
         try:
@@ -431,15 +425,37 @@ def copy_files(
         else:
             closest_dist = 2
 
-        #print(f"{file} {score} {closest_dist}")
-        dest_file = dest_path / file.name
-            
         # Arbitrary threshold
         if closest_dist < 0.2:
             print(f"DUPLICATE {file}")
             continue
         
         selected_embeddings = torch.cat((selected_embeddings, embedding[None,:]))
+        yield file
+        output_count += 1
+        if output_count >= max_outputs:
+            break
+    
+def copy_files(
+        source_dir: str,
+        dest_dir: str,
+        max_outputs: int,
+        encourage_diversity: bool,
+        state: dict,
+        progress: gr.Progress = gr.Progress(),
+    ):
+    
+    if source_dir == dest_dir:
+        return f"Source directory and destination directory are the same, choose different directories"
+    
+    source_path = Path(source_dir)
+    dest_path = Path(dest_dir)
+    
+    dest_path.mkdir(parents=True, exist_ok=True)
+
+    for file in select_files(source_dir, max_outputs, encourage_diversity, state, progress):
+        dest_file = dest_path / file.name
+        
         if dest_file.is_file():
             print(f"EXISTS {file} {dest_file}")
         else:
@@ -450,12 +466,22 @@ def copy_files(
                 dest_file_txt = dest_path / file_txt.name
                 print(f"COPY {file_txt} {dest_file_txt}")
                 shutil.copy2(file_txt, dest_file_txt)
-        output_count += 1
-        if output_count >= max_outputs:
-            break
             
     return get_status_text(state)
+
+def preview_files(
+        source_dir: str,
+        dest_dir: str,
+        max_outputs: int,
+        encourage_diversity: bool,
+        state: dict,
+        progress: gr.Progress = gr.Progress(),
+    ):
     
+    max_outputs = min(max_outputs, 20)
+
+    files = [str(file) for file in select_files(source_dir, max_outputs, encourage_diversity, state, progress)]
+    return get_status_text(state), files
     
 def on_ui_tabs():
     def get_prompts():
@@ -575,13 +601,15 @@ def on_ui_tabs():
                     preprocess_filter_confidence = gr.Slider(label="Filter confidence threshold", value=0.5, minimum=0, maximum=1, step=0.01)
                     preprocess_caption_txt = gr.Radio(label="Existing caption txt", value="Copy", choices=["Ignore", "Copy", "Append", "Prepend"], interactive=True)
                     with gr.Row():
-                        preprocess_random_crops = gr.Checkbox(label="Encourage diversity")
+                        preprocess_encourage_diversity = gr.Checkbox(label="Encourage diversity")
                         preprocess_caption_blip2 = gr.Checkbox(label="Caption using BLIP2")
                         preprocess_caption_wd14 = gr.Checkbox(label="Caption using Waifu Diffusion 1.4 tagger")
                         preprocess_use_hardlink = gr.Checkbox(label="Use hardlinks where possible")
                 with gr.Column():
-                    preprocess_images_btn = gr.Button(value="Preprocess images")
-                    gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
+                    with gr.Row():
+                        preprocess_images_btn = gr.Button(value="Preprocess images")
+                        preview_btn = gr.Button(value="Preview")
+                    preview_gallery = gr.Gallery(label="Preview", preview=True).style(columns=4, object_fit='contain')
         
         def prompt_dropdown_change(prompt):
             if prompt == "default":
@@ -623,12 +651,15 @@ def on_ui_tabs():
         
         load_model_btn.click(change_embedding_config, cancels=[calc_embeddings_event], inputs=[model_dropdown], status_tracker=[status_area], outputs=[status_area])
     
-        preprocess_images_btn.click(copy_files, inputs=[
+        preprocess_inputs = [
             preprocess_input_path, 
             preprocess_output_path, 
             preprocess_maximum, 
+            preprocess_encourage_diversity,
             state,
-        ], outputs=[status_area])
+        ]
+        preprocess_images_btn.click(copy_files, inputs=preprocess_inputs, outputs=[status_area])
+        preview_btn.click(preview_files, inputs=preprocess_inputs, outputs=[status_area, preview_gallery])
     
         status_area.value = get_status_text(state.value)
     
