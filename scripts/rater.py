@@ -482,9 +482,11 @@ def preview_files(
         progress: gr.Progress = gr.Progress(),
     ):
     
-    max_outputs = min(max_outputs, 20)
-
     files = [str(file) for file in select_files(source_dir, max_outputs, encourage_diversity, state, progress)]
+    rand = random.Random(12345)
+    rand.shuffle(files)
+    files = files[0:20]
+    
     return get_status_text(state), files
     
 def on_ui_tabs():
