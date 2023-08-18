@@ -445,6 +445,10 @@ def copy_files(
         progress: gr.Progress = gr.Progress(),
     ):
     
+    if not source_dir:
+        return "Source directory must be non-empty"
+    if not dest_dir:
+        return "Destination directory must be non-empty"
     if source_dir == dest_dir:
         return f"Source directory and destination directory are the same, choose different directories"
     
