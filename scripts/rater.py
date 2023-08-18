@@ -404,36 +404,50 @@ def select_files(
     for file in filepaths:
         try:
             embedding = embedding_cache.get_embedding(file)
-            score = model.get_score(embedding).item()
             items.append(dict(
                 file = file,
                 embedding = embedding,
-                score = score,
             ))
         except Exception as e:
             print(e)
+            
+    if len(items) == 0:
+        return
 
-    selected_embeddings = torch.empty(0, embedding_cache.embed_length)
-
+    embeddings = torch.stack([item["embedding"] for item in items])
+    scores = model.get_score(embeddings).squeeze(dim=1)
+    selected = torch.full([len(items)], False)
+    
+    if encourage_diversity:
+        distance_scores = torch.full([len(items)], 2)
+    
     output_count = 0
-    for item in sorted(items, key=lambda fs: fs["score"], reverse=True):
-        file = item["file"]
-        embedding = item["embedding"]
-        score = item["score"]
-        if selected_embeddings.shape[0] > 0:
-            closest_dist = (embedding - selected_embeddings).norm(dim=1).min()
+    while output_count < max_outputs:
+        if encourage_diversity:
+            adjusted_scores = scores + distance_scores + torch.where(selected, -math.inf, 0)
         else:
-            closest_dist = 2
+            adjusted_scores = scores + torch.where(selected, -math.inf, 0)
+        index = torch.argmax(adjusted_scores)
+        file = items[index]["file"]
 
-        # Arbitrary threshold
-        if closest_dist < 0.2:
-            print(f"DUPLICATE {file}")
-            continue
+        if encourage_diversity:
+            distance = distance_scores[index]
+            distance_scores = torch.min(distance_scores, (embeddings[index] - embeddings).norm(dim=1))
+        else:
+            selected_embeddings = embeddings[selected]
+            if selected_embeddings.numel() > 0:
+                distance = (embeddings[index] - selected_embeddings).norm(dim=1).min()
+            else:
+                distance = 2
         
-        selected_embeddings = torch.cat((selected_embeddings, embedding[None,:]))
-        yield file
-        output_count += 1
-        if output_count >= max_outputs:
+        selected[index] = True
+        if distance < 0.2:
+            print(f"DUPLICATE {file}")
+        else:
+            yield file
+            output_count += 1
+
+        if selected.all():
             break
     
 def copy_files(
