@@ -71,7 +71,7 @@ def generate_comparison(state: dict):
     random.shuffle(filepaths)
     score_model = state.get('score_model', None)
     if state['opt_prefer_high_scoring'] and score_model != None:
-        candidates = filepaths[0:5]
+        candidates = filepaths[0:state['opt_high_scoring_n']]
         candidates.sort(reverse=True, key=lambda filename: score_model.get_score(embedding_cache.get_embedding(filename)))
         print(candidates)
         selected = candidates[0:2]
@@ -525,6 +525,7 @@ def on_ui_tabs():
                     status_area = gr.Textbox(label="Status", interactive=False, lines=2)
                     with gr.Row():
                         prefer_high_scoring = gr.Checkbox(label="Prefer high-scoring images", value=True, interactive=True)
+                        high_scoring_n = gr.Slider(label="Best of N", value=5, minimum=5, maximum=100, step=5)
         with gr.Tab(label="Rate"):
             prompt_html = gr.HTML(value="Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
@@ -641,6 +642,9 @@ def on_ui_tabs():
         def prefer_high_scoring_change(val, state):
             state['opt_prefer_high_scoring'] = val
         prefer_high_scoring.change(prefer_high_scoring_change, inputs=[prefer_high_scoring, state])
+        def high_scoring_n_change(val, state):
+            state['opt_high_scoring_n'] = val
+        high_scoring_n.change(high_scoring_n_change, inputs=[high_scoring_n, state])
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
