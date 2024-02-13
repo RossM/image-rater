@@ -33,12 +33,12 @@ class MTree:
                     # The new root would end up with a larger radius, abort rebalancing
                     return
             
-                print(f"Before rebalance (round {r} depth {rebalance_depth}):\n{self}")
+                #print(f"Before rebalance (round {r} depth {rebalance_depth}):\n{self}")
                 self.reset()
                 self._point = new_parent._point
                 for distance, child in children:
                     self.add_node(child, dist_func, distance, rebalance_depth+1)
-                print(f"After rebalance (round {r} depth {rebalance_depth}):\n{self}")
+                #print(f"After rebalance (round {r} depth {rebalance_depth}):\n{self}")
         
         def add_node(self, node, dist_func, distance = None, rebalance_depth=0):
             if node == None:
@@ -46,12 +46,11 @@ class MTree:
             
             self._count += node._count
 
-            if distance == None:
-                distance = dist_func(node._point, self._point)
-              
             if node._count < 100:
                 self._radius = max(self._radius, max(dist_func(point, self._point) for point in iter(node)))
             else:
+                if distance == None:
+                    distance = dist_func(node._point, self._point)              
                 self._radius = max(self._radius, distance + node._radius)
             
             if self._left == None:
@@ -73,7 +72,7 @@ class MTree:
             if rebalance_depth < 5 and self._left != None and self._right != None:
                 self.rebalance(dist_func, rebalance_depth)
                
-            assert(self._radius >= max(dist_func(point, self._point) for point in iter(self)))
+            #assert(self._radius >= max(dist_func(point, self._point) for point in iter(self)))
          
         def get_nearest(self, point, dist_func, best_dist, best_value, distance = None):
             if distance == None:
@@ -104,7 +103,7 @@ class MTree:
             return best_dist, best_value
         
         def __repr__(self, w=""):
-            return f"{self._point} ({self._radius})\n{w}+>{self._right.__repr__(w + '| ') if self._right else 'None'}\n{w}+>{self._left.__repr__(w + '  ') if self._left else 'None'}"
+            return f"{self._point} ({self._radius})\n{w}+-{self._right.__repr__(w + '| ') if self._right else 'None'}\n{w}+-{self._left.__repr__(w + '  ') if self._left else 'None'}"
         
         def __iter__(self):
             yield self._point
