@@ -13,18 +13,14 @@ class MTree:
             self._count = 1
             
         def rebalance(self, dist_func, rebalance_depth):
-            old_point = self._point
             for r in range(3):
-                if self._left._count >= self._right._count + 5:
+                dist_lc = dist_func(self._point, self._left._point)
+                dist_rc = dist_func(self._point, self._right._point)
+                dist_lr = dist_func(self._left._point, self._right._point)
+                if dist_rc > dist_lc and dist_rc > dist_lr:
                     new_parent = self._left
                     children = [self._left._left, self._left._right, self._right, MTree.Node(self._point)]
-                elif self._right._count >= self._left._count + 5:
-                    new_parent = self._right
-                    children = [self._right._left, self._right._right, self._left, MTree.Node(self._point)]
-                elif self._left._radius > self._radius and self._left._count <= self._right._count:
-                    new_parent = self._left
-                    children = [self._left._left, self._left._right, self._right, MTree.Node(self._point)]
-                elif self._right._radius > self._radius and self._right._count <= self._left._count:
+                elif dist_lc > dist_rc and dist_lc > dist_lr:
                     new_parent = self._right
                     children = [self._right._left, self._right._right, self._left, MTree.Node(self._point)]
                 else:
@@ -35,15 +31,14 @@ class MTree:
             
                 if children[0][0] > self._radius:
                     # The new root would end up with a larger radius, abort rebalancing
-                    self._point = old_point
                     return
             
-                #print(f"Before rebalance (round {r} depth {rebalance_depth}):\n{self}")
+                print(f"Before rebalance (round {r} depth {rebalance_depth}):\n{self}")
                 self.reset()
                 self._point = new_parent._point
                 for distance, child in children:
                     self.add_node(child, dist_func, distance, rebalance_depth+1)
-                #print(f"After rebalance (round {r} depth {rebalance_depth}):\n{self}")
+                print(f"After rebalance (round {r} depth {rebalance_depth}):\n{self}")
         
         def add_node(self, node, dist_func, distance = None, rebalance_depth=0):
             if node == None:
@@ -55,7 +50,7 @@ class MTree:
                 distance = dist_func(node._point, self._point)
               
             if node._count < 100:
-                self._radius = max(dist_func(point, self._point) for point in iter(node))
+                self._radius = max(self._radius, max(dist_func(point, self._point) for point in iter(node)))
             else:
                 self._radius = max(self._radius, distance + node._radius)
             
@@ -63,6 +58,10 @@ class MTree:
                 self._left = node
             elif self._right == None:
                 self._right = node
+            elif self._left._count + 5 <= self._right._count:
+                self._left.add_node(node, dist_func, None, rebalance_depth)
+            elif self._right._count + 5 <= self._left._count:
+                self._right.add_node(node, dist_func, None, rebalance_depth)
             else:
                 left_dist = dist_func(node._point, self._left._point)
                 right_dist = dist_func(node._point, self._right._point)
@@ -70,9 +69,11 @@ class MTree:
                     self._left.add_node(node, dist_func, left_dist, rebalance_depth)
                 else:
                     self._right.add_node(node, dist_func, right_dist, rebalance_depth)
-            
-            if rebalance_depth < 2 and self._left != None and self._right != None:
+
+            if rebalance_depth < 5 and self._left != None and self._right != None:
                 self.rebalance(dist_func, rebalance_depth)
+               
+            assert(self._radius >= max(dist_func(point, self._point) for point in iter(self)))
          
         def get_nearest(self, point, dist_func, best_dist, best_value, distance = None):
             if distance == None:
