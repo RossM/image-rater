@@ -1,3 +1,5 @@
+from doctest import debug
+from importlib.machinery import DEBUG_BYTECODE_SUFFIXES
 import random
 from re import S
 import time
@@ -7,6 +9,9 @@ import gc
 import json
 import math
 import gradio as gr
+
+import heapq
+from scripts.modules.mtree import MTree
 
 import torch
 import torch.nn as nn
@@ -415,12 +420,7 @@ def select_files(
             
     if len(items) == 0:
         return
-
-    embeddings = torch.stack([item["embedding"] for item in items])
-    scores = model.get_score(embeddings).squeeze(dim=1)
-    selected = torch.full([len(items)], False)
-    distances = torch.full([len(items)], 2, dtype=torch.float32)
-        
+    
     if euclidean:
         distance_metric = lambda x, y: (x - y).norm(dim=1)
         duplicate_threshold = 0.2
@@ -428,24 +428,33 @@ def select_files(
         distance_metric = lambda x, y: 1 - x @ y
         duplicate_threshold = 0.02
     
-    output_count = 0
-    while output_count < max_outputs:
-        adjusted_scores = torch.lerp(scores, distances, diversity_weight) + torch.where(selected, -math.inf, 0)
-        index = torch.argmax(adjusted_scores)
-        file = items[index]["file"]
-
-        distance = distances[index]
-        distances = torch.min(distances, distance_metric(embeddings, embeddings[index]))
+    max_distance = torch.tensor(2.0)
         
-        selected[index] = True
+    embeddings = torch.stack([item["embedding"] for item in items])
+    scores = model.get_score(embeddings).squeeze(dim=1)
+    priorities = torch.lerp(scores, max_distance, diversity_weight)
+
+    mtree = MTree(lambda x, y: (x - y).norm().item())
+    queue = [(-priorities[i], max_distance, i) for i in range(len(items))]
+    queue.sort()
+    
+    output_count = 0
+    while len(queue) > 0 and output_count < max_outputs:
+        priority, saved_distance, index = heapq.heappop(queue)
+        _, nearest = mtree.get_nearest(embeddings[index])
+        distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
+        if distance < saved_distance:
+            priority = torch.lerp(scores[index], distance, diversity_weight)
+            heapq.heappush(queue, (-priority, distance, index))
+            continue
+
+        file = items[index]["file"]
         if distance < duplicate_threshold:
             print(f"DUPLICATE {file}")
         else:
             yield file
             output_count += 1
-
-        if selected.all():
-            break
+            mtree.add_point(embeddings[index])
     
 def copy_files(
         source_dir: str,
