@@ -1,5 +1,4 @@
 from math import inf
-from tkinter import W
 
 class MTree:
     class Node:    
