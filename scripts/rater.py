@@ -8,8 +8,9 @@ import gc
 import json
 import math
 import gradio as gr
-from scripts.modules.kdtree import KDTree
+
 import heapq
+from scripts.modules.mtree import MTree
 
 import torch
 import torch.nn as nn
@@ -432,14 +433,14 @@ def select_files(
     scores = model.get_score(embeddings).squeeze(dim=1)
     priorities = torch.lerp(scores, max_distance, diversity_weight)
 
-    kdtree = KDTree([], embeddings.shape[1], lambda x, y: ((x - y) ** 2).sum().item())
+    mtree = MTree(lambda x, y: (x - y).norm().item())
     queue = [(-priorities[i], max_distance, i) for i in range(len(items))]
     queue.sort()
     
     output_count = 0
     while len(queue) > 0 and output_count < max_outputs:
         priority, saved_distance, index = heapq.heappop(queue)
-        nearest = kdtree.get_nearest(embeddings[index], return_dist_sq=False)
+        _, nearest = mtree.get_nearest(embeddings[index])
         distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
         if distance < saved_distance:
             priority = torch.lerp(scores[index], distance, diversity_weight)
@@ -452,7 +453,7 @@ def select_files(
         else:
             yield file
             output_count += 1
-            kdtree.add_point(embeddings[index])
+            mtree.add_point(embeddings[index])
     
 def copy_files(
         source_dir: str,
