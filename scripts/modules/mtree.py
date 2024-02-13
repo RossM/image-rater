@@ -6,6 +6,17 @@ class MTree:
             self._point = point
             self._left = self._right = None
             self._radius = 0
+            
+        def rebalance(self, dist_func):
+            lc_dist = dist_func(self._point, self._left._point)
+            rc_dist = dist_func(self._point, self._right._point)
+            lr_dist = dist_func(self._left._point, self._right._point)
+            if lc_dist > rc_dist and lc_dist > lr_dist:
+                self._point, self._right._point = self._right._point, self._point
+                self._radius = max(rc_dist, lr_dist)
+            elif rc_dist > lc_dist and rc_dist > lr_dist:
+                self._point, self._left._point = self._left._point, self._point
+                self._radius = max(lc_dist, lr_dist)
         
         def add_point(self, point, dist_func, distance = None):
             if distance == None:
@@ -15,6 +26,7 @@ class MTree:
                 self._left = MTree.Node(point)
             elif self._right == None:
                 self._right = MTree.Node(point)
+                self.rebalance(dist_func)
             else:
                 left_dist = dist_func(point, self._left._point)
                 right_dist = dist_func(point, self._right._point)
@@ -50,6 +62,9 @@ class MTree:
                     if left_dist < best_dist:
                         best_dist, best_value = left_dist, left_value
             return best_dist, best_value
+        
+        def __repr__(self, w=""):
+            return f"{self._point} ({self._radius})\n{w}+>{self._right.__repr__(w + '| ') if self._right else 'None'}\n{w}+>{self._left.__repr__(w + '  ') if self._left else 'None'}"
 
     def __init__(self, dist_func):
         self._root = None
