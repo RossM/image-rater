@@ -1,3 +1,5 @@
+from doctest import debug
+from importlib.machinery import DEBUG_BYTECODE_SUFFIXES
 import random
 import time
 import os
@@ -6,6 +8,8 @@ import gc
 import json
 import math
 import gradio as gr
+from scripts.modules.kdtree import KDTree
+import heapq
 
 import torch
 import torch.nn as nn
@@ -414,12 +418,7 @@ def select_files(
             
     if len(items) == 0:
         return
-
-    embeddings = torch.stack([item["embedding"] for item in items])
-    scores = model.get_score(embeddings).squeeze(dim=1)
-    selected = torch.full([len(items)], False)
-    distances = torch.full([len(items)], 2, dtype=torch.float32)
-        
+    
     if euclidean:
         distance_metric = lambda x, y: (x - y).norm(dim=1)
         duplicate_threshold = 0.2
@@ -427,24 +426,33 @@ def select_files(
         distance_metric = lambda x, y: 1 - x @ y
         duplicate_threshold = 0.02
     
-    output_count = 0
-    while output_count < max_outputs:
-        adjusted_scores = torch.lerp(scores, distances, diversity_weight) + torch.where(selected, -math.inf, 0)
-        index = torch.argmax(adjusted_scores)
-        file = items[index]["file"]
-
-        distance = distances[index]
-        distances = torch.min(distances, distance_metric(embeddings, embeddings[index]))
+    max_distance = torch.tensor(2.0)
         
-        selected[index] = True
+    embeddings = torch.stack([item["embedding"] for item in items])
+    scores = model.get_score(embeddings).squeeze(dim=1)
+    priorities = torch.lerp(scores, max_distance, diversity_weight)
+
+    kdtree = KDTree([], embeddings.shape[1], lambda x, y: ((x - y) ** 2).sum().item())
+    queue = [(-priorities[i], max_distance, i) for i in range(len(items))]
+    queue.sort()
+    
+    output_count = 0
+    while len(queue) > 0 and output_count < max_outputs:
+        priority, saved_distance, index = heapq.heappop(queue)
+        nearest = kdtree.get_nearest(embeddings[index], return_dist_sq=False)
+        distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
+        if distance < saved_distance:
+            priority = torch.lerp(scores[index], distance, diversity_weight)
+            heapq.heappush(queue, (-priority, distance, index))
+            continue
+
+        file = items[index]["file"]
         if distance < duplicate_threshold:
             print(f"DUPLICATE {file}")
         else:
             yield file
             output_count += 1
-
-        if selected.all():
-            break
+            kdtree.add_point(embeddings[index])
     
 def copy_files(
         source_dir: str,
@@ -525,7 +533,7 @@ def on_ui_tabs():
                     status_area = gr.Textbox(label="Status", interactive=False, lines=2)
                     with gr.Row():
                         prefer_high_scoring = gr.Checkbox(label="Prefer high-scoring images", value=True, interactive=True)
-                        high_scoring_n = gr.Slider(label="Best of N", value=5, minimum=5, maximum=100, step=5)
+                        high_scoring_n = gr.Slider(label="Best of N", value=5, minimum=5, maximum=100, step=1)
         with gr.Tab(label="Rate"):
             prompt_html = gr.HTML(value="Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
@@ -645,6 +653,9 @@ def on_ui_tabs():
         def high_scoring_n_change(val, state):
             state['opt_high_scoring_n'] = val
         high_scoring_n.change(high_scoring_n_change, inputs=[high_scoring_n, state])
+        
+        state.value['opt_prefer_high_scoring'] = True
+        state.value['opt_high_scoring_n'] = 5.0
         
         load_event = load_images_btn.click(load_images, inputs=[images_path, model_dropdown, state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
         unload_btn.click(clear_images, cancels=[load_event], inputs=[state], status_tracker=[status_area], outputs=[status_area, left_img, right_img])
