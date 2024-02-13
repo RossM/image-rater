@@ -131,11 +131,11 @@ class MTree:
                         best_dist, best_value = left_dist, left_value
             return best_dist, best_value
 
-        def __repr__(self, w=""):
+        def pretty_print(self, w=""):
             return (
                 f"{self._point} ({self._radius})\n"
-                + f"{w}+-{self._right.__repr__(w + '| ') if self._right else 'None'}\n"
-                + f"{w}+-{self._left.__repr__(w + '  ') if self._left else 'None'}"
+                + f"{w}+-{self._right.pretty_print(w + '| ') if isinstance(self._right, MTree) else repr(self._right)}\n"
+                + f"{w}+-{self._left.pretty_print(w + '  ') if isinstance(self._left, MTree) else repr(self._left)}"
             )
 
         def __iter__(self):
