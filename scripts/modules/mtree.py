@@ -1,5 +1,5 @@
 from math import inf
-
+import torch
 
 class MTree:
     class Node:
@@ -60,7 +60,7 @@ class MTree:
 
             self._count += node._count
 
-            if node._count < 100:
+            if node._count < 10000:
                 self._radius = max(
                     self._radius,
                     max(dist_func(point, self._point) for point in iter(node)),
@@ -145,9 +145,12 @@ class MTree:
             if self._right != None:
                 yield from self._right
 
-    def __init__(self, dist_func):
+    def __init__(self, dist_func=None):
+        def torch_distance(x: torch.Tensor, y: torch.Tensor):
+            return (x - y).norm().item()
+
         self._root = None
-        self._dist_func = dist_func
+        self._dist_func = dist_func or torch_distance
 
     def add_point(self, point):
         if self._root == None:

@@ -7,11 +7,12 @@ from scripts.modules.mtree import *
 class MTreeUnitTest(unittest.TestCase):
     
     def test_all(self):
+
         with cProfile.Profile() as pr:
-            data = torch.randn((2000, 128))
+            data = torch.randn((5000, 128))
             data.div_(data.norm(dim=1,keepdim=True))
         
-            mtree = MTree(lambda x, y: (x - y).norm().item())
+            mtree = MTree()
         
             for i in range(data.shape[0]):
                 dist, val = mtree.get_nearest(data[i])
