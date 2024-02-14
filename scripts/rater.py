@@ -434,14 +434,14 @@ def select_files(
     scores = model.get_score(embeddings).squeeze(dim=1)
     priorities = torch.lerp(scores, max_distance, diversity_weight)
 
-    mtree = MTree(lambda x, y: (x - y).norm().item())
+    mtree = MTree()
     queue = [(-priorities[i], max_distance, i) for i in range(len(items))]
     queue.sort()
     
     output_count = 0
     while len(queue) > 0 and output_count < max_outputs:
         priority, saved_distance, index = heapq.heappop(queue)
-        _, nearest = mtree.get_nearest(embeddings[index])
+        _, nearest = mtree.get_nearest(embeddings[index], max_dist=saved_distance)
         distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
         if distance < saved_distance:
             priority = torch.lerp(scores[index], distance, diversity_weight)

@@ -13,8 +13,8 @@ class MTreeUnitTest(unittest.TestCase):
         data = torch.randn((50000, 128))
         data.div_(data.norm(dim=1, keepdim=True))
 
-        for branching in [32, 16, 8, 4, 2]:
-            for max_node_size in [16384, 4096, 1024]:
+        for branching in [8, 6, 4, 2]:
+            for max_node_size in [16384, 8192, 4096]:
                 start_time = time.monotonic()
                 stop_time = start_time + 20
                 steps = 0
