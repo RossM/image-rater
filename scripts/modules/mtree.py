@@ -46,12 +46,18 @@ class MTree:
         def split(self, tree: "MTree") -> None:
             points = self._points
             self._points = k_means(points, groups=tree._branching)
-            self._children = [None] * self._points.shape[0]
-            self._radii = points.new_zeros((self._points.shape[0]))
+            group_count = self._points.shape[0]
+            self._children = [None] * group_count
+            self._radii = points.new_zeros((group_count))
 
-            distances = torch.cdist(self._points, points)
+            if tree._has_custom_dist_func:
+                distances = points.new_zeros((group_count, points.shape[0]))
+                for i in range(group_count):
+                    distances[i] = tree._dist_func(self._points[i][None,:], points)
+            else:
+                distances = torch.cdist(self._points, points)
             group_idx = distances.argmin(dim=0)
-            for i in range(tree._branching):
+            for i in range(group_count):
                 self._children[i] = MTree.Node(
                     points[group_idx == i], tree._max_node_size
                 )
@@ -94,6 +100,7 @@ class MTree:
     _max_node_size: int
     _branching: int
     _debug: bool
+    _has_custom_dist_func: bool
 
     def __init__(
         self,
@@ -109,6 +116,7 @@ class MTree:
         self._max_node_size = max_node_size
         self._branching = min(branching, max_node_size)
         self._debug = False
+        self._has_custom_dist_func = dist_func != None
 
     @torch.no_grad()
     def add_point(self, point: Tensor | list[float]):

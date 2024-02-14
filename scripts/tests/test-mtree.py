@@ -53,6 +53,31 @@ class MTreeUnitTest(unittest.TestCase):
             self.assertAlmostEqual(dist, truth_dist.item())
             self.assertTrue(torch.allclose(val, truth_val))
 
+    def test_mtree_custom_dist_func(self):
+
+        data = torch.randn((1000, 128))
+        data.div_(data.norm(dim=1, keepdim=True))
+
+        def dist_func(x: Tensor, y: Tensor) -> Tensor:
+            return (x - y).norm(1, dim=-1) * 10
+
+        mtree = MTree(dist_func=dist_func, max_node_size=64)
+        mtree._debug = True
+
+        for i in range(data.shape[0]):
+            mtree.add_point(data[i])
+
+        test_data = torch.randn((20, 128))
+        test_data.div_(test_data.norm(dim=1, keepdim=True))
+
+        for i in range(test_data.shape[0]):
+            truth_dist, truth_idx = dist_func(data, test_data[i][None,:]).min(dim=0)
+            truth_val = data[truth_idx]
+
+            dist, val = mtree.get_nearest(test_data[i])
+            self.assertAlmostEqual(dist, truth_dist.item())
+            self.assertTrue(torch.allclose(val, truth_val))
+
 
 if __name__ == "__main__":
     unittest.main()
