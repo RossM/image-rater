@@ -1,6 +1,7 @@
 import unittest
 import torch
 import cProfile
+import time
 
 from scripts.modules.mtree import *
 
@@ -9,19 +10,25 @@ class MTreeUnitTest(unittest.TestCase):
 
     def test_profile_mtree(self):
 
-        data = torch.randn((5000, 128))
+        data = torch.randn((50000, 128))
         data.div_(data.norm(dim=1, keepdim=True))
 
-        for branching in [8, 16]:
-            for max_node_size in [512, 1024, 2048, 4096]:
+        for branching in [32, 16, 8, 4, 2]:
+            for max_node_size in [16384, 4096, 1024]:
+                start_time = time.monotonic()
+                stop_time = start_time + 20
+                steps = 0
                 with cProfile.Profile() as pr:
                     mtree = MTree(max_node_size=max_node_size, branching=branching)
 
                     for i in range(data.shape[0]):
                         dist, val = mtree.get_nearest(data[i])
                         mtree.add_point(data[i])
+                        steps += 1
+                        if time.monotonic() > stop_time:
+                            break
 
-                print(f"branching = {branching}, max_node_size = {max_node_size}")
+                print(f"branching = {branching}, max_node_size = {max_node_size}, steps = {steps}")
                 pr.print_stats("time")
 
     def test_mtree(self):
