@@ -26,12 +26,12 @@ class MTree:
                     self._children = [None] * self._points.shape[0]
                     self._radii = self._points.new_zeros((self._points.shape[0]))
 
-                _, index = tree._dist_func(point[None, :], self._points).min(dim=0)
+                dist, index = tree._dist_func(point[None, :], self._points).min(dim=0)
                 if self._children[index] == None:
                     self._children[index] = MTree.Node(point[None, :])
                 else:
                     self._children[index].add_point(tree, point)
-                    self._radii[index].clamp_(min=tree._dist_func(self._points[0], point))
+                    self._radii[index].clamp_(min=dist)
 
         def get_nearest(
             self, tree: "MTree", point: Tensor, best_dist: Tensor, best_point: Tensor
@@ -45,7 +45,10 @@ class MTree:
             if self._children != None:
                 for index in indexes:
                     child = self._children[index]
-                    if child != None and distances[index] < self._radii[index] + best_dist:
+                    if (
+                        child != None
+                        and distances[index] < self._radii[index] + best_dist
+                    ):
                         best_dist, best_point = child.get_nearest(
                             tree, point, best_dist, best_point
                         )
