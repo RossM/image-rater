@@ -53,17 +53,24 @@ class MTree:
             if tree._has_custom_dist_func:
                 distances = points.new_zeros((group_count, points.shape[0]))
                 for i in range(group_count):
-                    distances[i] = tree._dist_func(self._points[i][None,:], points)
+                    distances[i] = tree._dist_func(self._points[i][None, :], points)
             else:
                 distances = torch.cdist(self._points, points)
+
             group_idx = distances.argmin(dim=0)
+
             for i in range(group_count):
                 self._children[i] = MTree.Node(
                     points[group_idx == i], tree._max_node_size
                 )
                 self._radii[i] = distances[i][group_idx == i].max()
                 if tree._debug:
-                    assert(torch.allclose(self._radii[i], tree._dist_func(self._points[i][None,:], points[group_idx == i]).max()))
+                    assert torch.allclose(
+                        self._radii[i],
+                        tree._dist_func(
+                            self._points[i][None, :], points[group_idx == i]
+                        ).max(),
+                    )
 
         def add_point(self, tree: "MTree", point: Tensor) -> None:
             self._count += 1
@@ -107,7 +114,7 @@ class MTree:
         dist_func: Callable[[Tensor, Tensor], Tensor] = None,
         max_node_size: int = 16384,
         branching: int = 4,
-    ):
+    ) -> None:
         def torch_distance(x: Tensor, y: Tensor) -> Tensor:
             return (x - y).norm(dim=-1)
 
@@ -119,7 +126,7 @@ class MTree:
         self._has_custom_dist_func = dist_func != None
 
     @torch.no_grad()
-    def add_point(self, point: Tensor | list[float]):
+    def add_point(self, point: Tensor | list[float]) -> None:
         if isinstance(point, list):
             point = torch.tensor(point)
 
