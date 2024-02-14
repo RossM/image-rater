@@ -36,7 +36,8 @@ class MTreeUnitTest(unittest.TestCase):
         data = torch.randn((1000, 128))
         data.div_(data.norm(dim=1, keepdim=True))
 
-        mtree = MTree()
+        mtree = MTree(max_node_size=64)
+        mtree._debug = True
 
         for i in range(data.shape[0]):
             mtree.add_point(data[i])
@@ -49,7 +50,7 @@ class MTreeUnitTest(unittest.TestCase):
             truth_val = data[truth_idx]
 
             dist, val = mtree.get_nearest(test_data[i])
-            self.assertAlmostEqual(dist, truth_dist.item())
+            self.assertTrue(torch.allclose(torch.tensor(dist), truth_dist))
             self.assertTrue(torch.allclose(val, truth_val))
 
 
