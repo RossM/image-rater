@@ -1,165 +1,67 @@
 from math import inf
+from typing import Any, Callable, List, Tuple
 import torch
+from torch import Tensor
 
 class MTree:
     class Node:
-        def __init__(self, point):
-            self._point = point
-            self.reset()
+        _points: Tensor
+        _children: List['MTree.Node']
+        _radius: Tensor
+        _count: int
 
-        def reset(self):
-            self._left = self._right = None
-            self._radius = 0
-            self._count = 1
+        def __init__(self, points: Tensor):
+            self._points = points
+            self._children = []
+            self._radius = torch.tensor(0, dtype=points.dtype)
+            self._count = points.shape[0]
+        
+        def add_point(self, tree: 'MTree', point: Tensor):
+            self._points = torch.cat((self._points, point[None, :]), dim=0)
+            self._radius.clamp_(min=tree._dist_func(self._points[0], point))
+            self._count += 1
 
-        def rebalance(self, dist_func, rebalance_depth):
-            for r in range(3):
-                dist_lc = dist_func(self._point, self._left._point)
-                dist_rc = dist_func(self._point, self._right._point)
-                dist_lr = dist_func(self._left._point, self._right._point)
-                if dist_rc > dist_lc and dist_rc > dist_lr:
-                    new_parent = self._left
-                    children = [
-                        self._left._left,
-                        self._left._right,
-                        self._right,
-                        MTree.Node(self._point),
-                    ]
-                elif dist_lc > dist_rc and dist_lc > dist_lr:
-                    new_parent = self._right
-                    children = [
-                        self._right._left,
-                        self._right._right,
-                        self._left,
-                        MTree.Node(self._point),
-                    ]
-                else:
-                    return
+        def get_nearest(self, tree: 'MTree', point: Tensor, best_dist: Tensor, best_point: Tensor) -> Tuple[Tensor, Tensor]:
+            distances = tree._dist_func(self._points, point[None, :])
+            my_dist, my_idx = distances.min(dim=0)
+            if my_dist < best_dist:
+                best_dist, best_point = my_dist, self._points[my_idx]
+          
+            for child in self._children:
+                child_dist = tree._dist_func(child._points[0], point)
+                if child_dist < child._radius + best_dist:
+                    best_dist, best_point = child.get_nearest(tree, point, best_dist, best_point)
+                    
+            return best_dist, best_point
 
-                children = list(
-                    (dist_func(new_parent._point, child._point), child)
-                    for child in children
-                    if child != None
-                )
-                children.sort(key=lambda c: c[0], reverse=True)
 
-                if children[0][0] > self._radius:
-                    # The new root would end up with a larger radius, abort rebalancing
-                    return
+    _root: 'MTree.Node'
+    _dist_func: Callable[[Tensor, Tensor], Tensor]
 
-                # print(f"Before rebalance (round {r} depth {rebalance_depth}):\n{self}")
-                self.reset()
-                self._point = new_parent._point
-                for distance, child in children:
-                    self.add_node(child, dist_func, distance, rebalance_depth + 1)
-                # print(f"After rebalance (round {r} depth {rebalance_depth}):\n{self}")
-
-        def add_node(self, node, dist_func, distance=None, rebalance_depth=0):
-            if node == None:
-                return
-
-            self._count += node._count
-
-            if node._count < 10000:
-                self._radius = max(
-                    self._radius,
-                    max(dist_func(point, self._point) for point in iter(node)),
-                )
-            else:
-                if distance == None:
-                    distance = dist_func(node._point, self._point)
-                self._radius = max(self._radius, distance + node._radius)
-
-            if self._left == None:
-                self._left = node
-            elif self._right == None:
-                self._right = node
-            elif self._left._count + 5 <= self._right._count:
-                self._left.add_node(node, dist_func, None, rebalance_depth)
-            elif self._right._count + 5 <= self._left._count:
-                self._right.add_node(node, dist_func, None, rebalance_depth)
-            else:
-                left_dist = dist_func(node._point, self._left._point)
-                right_dist = dist_func(node._point, self._right._point)
-                if left_dist < right_dist:
-                    self._left.add_node(node, dist_func, left_dist, rebalance_depth)
-                else:
-                    self._right.add_node(node, dist_func, right_dist, rebalance_depth)
-
-            if rebalance_depth < 5 and self._left != None and self._right != None:
-                self.rebalance(dist_func, rebalance_depth)
-
-            # assert(self._radius >= max(dist_func(point, self._point) for point in iter(self)))
-
-        def get_nearest(self, point, dist_func, best_dist, best_value, distance=None):
-            if distance == None:
-                distance = dist_func(point, self._point)
-            if distance < best_dist:
-                best_dist, best_value = distance, self._point
-
-            left_dist = (
-                dist_func(point, self._left._point) if self._left != None else inf
-            )
-            right_dist = (
-                dist_func(point, self._right._point) if self._right != None else inf
-            )
-            if left_dist < right_dist:
-                if self._left != None and self._left._radius + best_dist > left_dist:
-                    left_dist, left_value = self._left.get_nearest(
-                        point, dist_func, best_dist, best_value, left_dist
-                    )
-                    if left_dist < best_dist:
-                        best_dist, best_value = left_dist, left_value
-                if self._right != None and self._right._radius + best_dist > right_dist:
-                    right_dist, right_value = self._right.get_nearest(
-                        point, dist_func, best_dist, best_value, right_dist
-                    )
-                    if right_dist < best_dist:
-                        best_dist, best_value = right_dist, right_value
-            else:
-                if self._right != None and self._right._radius + best_dist > right_dist:
-                    right_dist, right_value = self._right.get_nearest(
-                        point, dist_func, best_dist, best_value, right_dist
-                    )
-                    if right_dist < best_dist:
-                        best_dist, best_value = right_dist, right_value
-                if self._left != None and self._left._radius + best_dist > left_dist:
-                    left_dist, left_value = self._left.get_nearest(
-                        point, dist_func, best_dist, best_value, left_dist
-                    )
-                    if left_dist < best_dist:
-                        best_dist, best_value = left_dist, left_value
-            return best_dist, best_value
-
-        def pretty_print(self, w=""):
-            return (
-                f"{self._point} ({self._radius})\n"
-                + f"{w}+-{self._right.pretty_print(w + '| ') if isinstance(self._right, MTree) else repr(self._right)}\n"
-                + f"{w}+-{self._left.pretty_print(w + '  ') if isinstance(self._left, MTree) else repr(self._left)}"
-            )
-
-        def __iter__(self):
-            yield self._point
-            if self._left != None:
-                yield from self._left
-            if self._right != None:
-                yield from self._right
-
-    def __init__(self, dist_func=None):
-        def torch_distance(x: torch.Tensor, y: torch.Tensor):
-            return (x - y).norm().item()
+    def __init__(self, dist_func: Callable[[Tensor, Tensor], Tensor] = None):
+        def torch_distance(x: Tensor, y: Tensor) -> Tensor:
+            return (x - y).norm(dim=-1)
 
         self._root = None
         self._dist_func = dist_func or torch_distance
+        
+    @torch.no_grad()
+    def add_point(self, point: Tensor | list[float]):
+        if isinstance(point, list):
+            point = torch.tensor(point)
 
-    def add_point(self, point):
         if self._root == None:
-            self._root = MTree.Node(point)
+            self._root = MTree.Node(point[None,:])
         else:
-            self._root.add_node(MTree.Node(point), self._dist_func)
+            self._root.add_point(self, point)
 
-    def get_nearest(self, point):
+    @torch.no_grad()
+    def get_nearest(self, point: Tensor | list[float]) -> Tuple[float, Tensor]:
+        if isinstance(point, list):
+            point = torch.tensor(point)
+
         if self._root == None:
             return inf, None
         else:
-            return self._root.get_nearest(point, self._dist_func, inf, None)
+            dist, point = self._root.get_nearest(self, point, torch.tensor(inf), None)
+            return dist.item(), point

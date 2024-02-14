@@ -6,7 +6,7 @@ from scripts.modules.mtree import *
 
 class MTreeUnitTest(unittest.TestCase):
     
-    def test_all(self):
+    def test_mtree(self):
 
         with cProfile.Profile() as pr:
             data = torch.randn((5000, 128))
