@@ -55,7 +55,9 @@ class MTree:
                 self._children[i] = MTree.Node(
                     points[group_idx == i], tree._max_node_size
                 )
-                self._radii[i] = distances[group_idx, i].max()
+                self._radii[i] = distances[i][group_idx == i].max()
+                if tree._debug:
+                    assert(torch.allclose(self._radii[i], tree._dist_func(self._points[i][None,:], points[group_idx == i]).max()))
 
         def add_point(self, tree: "MTree", point: Tensor) -> None:
             self._count += 1
@@ -91,6 +93,7 @@ class MTree:
     _dist_func: Callable[[Tensor, Tensor], Tensor]
     _max_node_size: int
     _branching: int
+    _debug: bool
 
     def __init__(
         self,
@@ -105,6 +108,7 @@ class MTree:
         self._dist_func = dist_func or torch_distance
         self._max_node_size = max_node_size
         self._branching = min(branching, max_node_size)
+        self._debug = False
 
     @torch.no_grad()
     def add_point(self, point: Tensor | list[float]):

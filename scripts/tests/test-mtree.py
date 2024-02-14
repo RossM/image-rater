@@ -36,7 +36,8 @@ class MTreeUnitTest(unittest.TestCase):
         data = torch.randn((1000, 128))
         data.div_(data.norm(dim=1, keepdim=True))
 
-        mtree = MTree()
+        mtree = MTree(max_node_size=64)
+        mtree._debug = True
 
         for i in range(data.shape[0]):
             mtree.add_point(data[i])
