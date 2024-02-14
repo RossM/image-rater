@@ -9,19 +9,20 @@ class MTreeUnitTest(unittest.TestCase):
 
     def test_profile_mtree(self):
 
-        data = torch.randn((2000, 128))
+        data = torch.randn((5000, 128))
         data.div_(data.norm(dim=1, keepdim=True))
 
-        for max_node_size in [32, 64, 128]:
-            with cProfile.Profile() as pr:
-                mtree = MTree(max_node_size=max_node_size)
+        for branching in [8, 16]:
+            for max_node_size in [512, 1024, 2048, 4096]:
+                with cProfile.Profile() as pr:
+                    mtree = MTree(max_node_size=max_node_size, branching=branching)
 
-                for i in range(data.shape[0]):
-                    dist, val = mtree.get_nearest(data[i])
-                    mtree.add_point(data[i])
+                    for i in range(data.shape[0]):
+                        dist, val = mtree.get_nearest(data[i])
+                        mtree.add_point(data[i])
 
-            print(f"max_node_size = {max_node_size}")
-            pr.print_stats("time")
+                print(f"branching = {branching}, max_node_size = {max_node_size}")
+                pr.print_stats("time")
 
     def test_mtree(self):
 
