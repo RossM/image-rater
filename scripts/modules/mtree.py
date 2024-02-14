@@ -55,9 +55,7 @@ class MTree:
                 self._children[i] = MTree.Node(
                     points[group_idx == i], tree._max_node_size
                 )
-                self._radii[i] = distances[i][group_idx == i].max()
-                if tree._debug:
-                    assert(torch.allclose(self._radii[i], torch.cdist(self._points[i][None,:], points[group_idx == i]).squeeze(0).max()))
+                self._radii[i] = distances[group_idx, i].max()
 
         def add_point(self, tree: "MTree", point: Tensor) -> None:
             self._count += 1
@@ -66,14 +64,14 @@ class MTree:
                 if self._count >= tree._max_node_size:
                     self.split(tree)
             else:
-                dist, index = torch.cdist(point[None, :], self._points).squeeze(0).min(dim=0)
+                dist, index = tree._dist_func(point[None, :], self._points).min(dim=0)
                 self._children[index].add_point(tree, point)
                 self._radii[index].clamp_(min=dist)
 
         def get_nearest(
             self, tree: "MTree", point: Tensor, best_dist: Tensor, best_point: Tensor
         ) -> Tuple[Tensor, Tensor]:
-            distances = torch.cdist(point[None, :], self._points[: self._count]).squeeze(0)
+            distances = tree._dist_func(self._points[: self._count], point[None, :])
 
             if self._children == None:
                 new_dist, index = distances.min(dim=0)
@@ -90,12 +88,13 @@ class MTree:
             return best_dist, best_point
 
     _root: "MTree.Node"
+    _dist_func: Callable[[Tensor, Tensor], Tensor]
     _max_node_size: int
     _branching: int
-    _debug: bool
 
     def __init__(
         self,
+        dist_func: Callable[[Tensor, Tensor], Tensor] = None,
         max_node_size: int = 16384,
         branching: int = 4,
     ):
@@ -103,9 +102,9 @@ class MTree:
             return (x - y).norm(dim=-1)
 
         self._root = None
+        self._dist_func = dist_func or torch_distance
         self._max_node_size = max_node_size
         self._branching = min(branching, max_node_size)
-        self._debug = False
 
     @torch.no_grad()
     def add_point(self, point: Tensor | list[float]):
