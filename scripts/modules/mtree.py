@@ -82,12 +82,12 @@ class MTree:
             self._root.add_point(self, point)
 
     @torch.no_grad()
-    def get_nearest(self, point: Tensor | list[float]) -> Tuple[float, Tensor]:
+    def get_nearest(self, point: Tensor | list[float], max_dist: float = inf) -> Tuple[float, Tensor]:
         if isinstance(point, list):
             point = torch.tensor(point)
 
         if self._root == None:
-            return inf, None
+            return max_dist, None
         else:
-            dist, point = self._root.get_nearest(self, point, torch.tensor(inf), None)
+            dist, point = self._root.get_nearest(self, point, torch.tensor(max_dist), None)
             return dist.item(), point
