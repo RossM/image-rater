@@ -10,6 +10,7 @@ def k_means(points: Tensor, groups: int, rounds: int = 3) -> Tensor:
     for i, chunk in enumerate(points.chunk(groups)):
         centers[i] = chunk.mean(dim=0)
 
+    # Run k-means
     for _ in range(rounds):
         distances = torch.cdist(centers, points)
         group_index = distances.argmin(dim=0)
@@ -19,14 +20,13 @@ def k_means(points: Tensor, groups: int, rounds: int = 3) -> Tensor:
     distances = torch.cdist(centers, points)
     group_index = distances.argmin(dim=0)
 
-    reps = points.new_zeros(groups, points.shape[1])
-
+    # Find the point that minimizes the radius of each group
     for i in range(groups):
         group_points = points[group_index == i]
-        worst_dist, _ = torch.cdist(group_points, group_points).max(dim=1)
-        reps[i] = group_points[worst_dist.argmin(dim=0)]
+        radius, _ = torch.cdist(group_points, group_points).max(dim=1)
+        centers[i] = group_points[radius.argmin(dim=0)]
 
-    return reps
+    return centers
 
 
 class MTree:
