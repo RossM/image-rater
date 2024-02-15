@@ -388,7 +388,7 @@ def test_logistic_regression(
 @torch.no_grad()
 def select_files(
         source_dir: str,
-        max_outputs: int,
+        max_outputs: float,
         diversity_weight: float,
         euclidean: bool,
         state: dict,
@@ -421,6 +421,9 @@ def select_files(
     if len(items) == 0:
         return
     
+    if max_outputs < 1:
+        max_outputs = math.floor(max_outputs * len(items))
+    
     if euclidean:
         distance_metric = lambda x, y: (x - y).norm(dim=1)
         duplicate_threshold = 0.2
@@ -439,27 +442,38 @@ def select_files(
     queue.sort()
     
     output_count = 0
+    return_to_queue_count = 0
+    duplicate_count = 0
     while len(queue) > 0 and output_count < max_outputs:
+        # Get highest priority item
         priority, saved_distance, index = heapq.heappop(queue)
         _, nearest = mtree.get_nearest(embeddings[index], max_dist=saved_distance)
+        
+        # Recalculate priority
         distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
-        if distance < saved_distance:
-            priority = torch.lerp(scores[index], distance, diversity_weight)
+        priority = torch.lerp(scores[index], distance, diversity_weight)
+
+        # If this item is no longer the highest priority item, return it to the queue
+        if len(queue) > 0 and -priority > queue[0][0]:
             heapq.heappush(queue, (-priority, distance, index))
+            return_to_queue_count += 1
             continue
 
         file = items[index]["file"]
         if distance < duplicate_threshold:
+            duplicate_count += 1
             print(f"DUPLICATE {file}")
         else:
             yield file
             output_count += 1
             mtree.add_point(embeddings[index])
+
+    print(f"output_count: {output_count}, duplicate_count: {duplicate_count}, return_to_queue_count: {return_to_queue_count}")
     
 def copy_files(
         source_dir: str,
         dest_dir: str,
-        max_outputs: int,
+        max_outputs: float,
         diversity_weight: float,
         euclidean: bool,
         state: dict,
@@ -602,7 +616,7 @@ def on_ui_tabs():
                     preprocess_input_path = gr.Textbox(label="Source directory")
                     preprocess_input_include_subdirectories = gr.Checkbox(label="Include subdirectories")
                     preprocess_output_path = gr.Textbox(label="Destination directory")
-                    preprocess_maximum = gr.Number(label="Maximum output images", value=1000, precision=0)
+                    preprocess_maximum = gr.Number(label="Maximum output images", value=1000)
                     with gr.Row():
                         with gr.Column(scale=2):
                             preprocess_dimension = gr.Number(label="Output dimension", value=512, precision=0)
