@@ -435,10 +435,10 @@ def select_files(
         
     embeddings = torch.stack([item["embedding"] for item in items])
     scores = model.get_score(embeddings).squeeze(dim=1)
-    priorities = torch.lerp(scores, max_distance, diversity_weight)
+    priorities = -torch.lerp(scores, max_distance, diversity_weight)
 
     mtree = MTree()
-    queue = [(-priorities[i], max_distance, i) for i in range(len(items))]
+    queue = [(priorities[i], max_distance, i) for i in range(len(items))]
     queue.sort()
     
     output_count = 0
@@ -451,11 +451,11 @@ def select_files(
         
         # Recalculate priority
         distance = distance_metric(embeddings[index], nearest) if nearest != None else max_distance
-        priority = torch.lerp(scores[index], distance, diversity_weight)
+        priority = -torch.lerp(scores[index], distance, diversity_weight)
 
         # If this item is no longer the highest priority item, return it to the queue
-        if len(queue) > 0 and -priority > queue[0][0]:
-            heapq.heappush(queue, (-priority, distance, index))
+        if len(queue) > 0 and priority > queue[0][0]:
+            heapq.heappush(queue, (priority, distance, index))
             return_to_queue_count += 1
             continue
 
