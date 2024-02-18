@@ -79,7 +79,7 @@ def generate_comparison(state: dict):
     if state['opt_prefer_high_scoring'] and score_model != None:
         candidates = filepaths[0:state['opt_high_scoring_n']]
         candidates.sort(reverse=True, key=lambda filename: score_model.get_score(embedding_cache.get_embedding(filename)))
-        print(candidates)
+        #print(candidates)
         selected = candidates[0:2]
         random.shuffle(selected)
     else:
