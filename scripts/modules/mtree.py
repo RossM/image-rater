@@ -14,8 +14,8 @@ def k_means(points: Tensor, groups: int, rounds: int = 3) -> Tensor:
     for _ in range(rounds):
         distances = torch.cdist(centers, points)
         group_index = distances.argmin(dim=0)
-        for i in range(groups):
-            centers[i] = points[group_index == i].mean(dim=0)
+        centers.zero_()
+        centers.index_reduce_(0, group_index, points, "mean")
 
     distances = torch.cdist(centers, points)
     group_index = distances.argmin(dim=0)
