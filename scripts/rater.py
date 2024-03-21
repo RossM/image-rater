@@ -76,11 +76,14 @@ def generate_comparison(state: dict):
         
     random.shuffle(filepaths)
     score_model = state.get('score_model', None)
-    if state['opt_prefer_high_scoring'] and score_model != None:
+    if score_model != None:
         candidates = filepaths[0:state['opt_high_scoring_n']]
         candidates.sort(reverse=True, key=lambda filename: score_model.get_score(embedding_cache.get_embedding(filename)))
-        #print(candidates)
-        selected = candidates[0:2]
+        if state['opt_prefer_high_scoring']:
+            selected = candidates[0:2]
+        else:
+            index = random.randrange(0, len(candidates) - 1)
+            selected = candidates[index : index + 2]
         random.shuffle(selected)
     else:
         selected = filepaths[0:2]
@@ -549,7 +552,7 @@ def on_ui_tabs():
                     status_area = gr.Textbox(label="Status", interactive=False, lines=2)
                     with gr.Row():
                         prefer_high_scoring = gr.Checkbox(label="Prefer high-scoring images", value=True, interactive=True)
-                        high_scoring_n = gr.Slider(label="Best of N", value=5, minimum=5, maximum=100, step=1)
+                        high_scoring_n = gr.Slider(label="Candidate count", value=5, minimum=2, maximum=100, step=1)
         with gr.Tab(label="Rate"):
             prompt_html = gr.HTML(value="Pick the better image!", elem_id="imagerater_calltoaction")
             with gr.Row(elem_id="imagerater_image_row"):
